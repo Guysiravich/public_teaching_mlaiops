@@ -40,7 +40,10 @@ image-push: image ## Push to CONTAINER_REGISTRY via your adapter
 	python -c "from src import config; from cloudlayer.factory import get_adapter; \
 	print(get_adapter(config.load()).push_image(\"$(IMAGE):$(TAG)\"))"
 
+# The image runs as non-root uid 10001, which cannot write into a bind-mounted
+# reports/ owned by whoever cloned the repo. Open it up before mounting.
 reproduce: data image ## THE ONE COMMAND. Grader runs this.
+	@mkdir -p reports && chmod a+rwx reports
 	docker run --rm \
 	  -v "$$PWD/data:/app/data:ro" \
 	  -v "$$PWD/reports:/app/reports" \

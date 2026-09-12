@@ -36,6 +36,10 @@ COPY --chown=runner:runner src/ ./src/
 COPY --chown=runner:runner cloudlayer/ ./cloudlayer/
 COPY --chown=runner:runner scripts/ ./scripts/
 
+# MLflow logs artifacts to ./mlruns relative to WORKDIR. /app is root-owned,
+# so the non-root runner cannot create it. Make the workdir writable.
+RUN mkdir -p /app/mlruns && chown -R runner:runner /app
+
 USER runner
 
 # Credentials NEVER enter an image layer. They arrive at runtime from SECRET_STORE_PATH
