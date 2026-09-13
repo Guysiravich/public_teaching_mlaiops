@@ -21,8 +21,15 @@ setup: ## Install dependencies and print environment status
 cloud-check: ## Resolve the eight capability slots
 	python scripts/cloud_check.py
 
-data: ## Generate the default dataset (deterministic)
-	python scripts/make_dataset.py --seed $(SEED)
+# Generated inside the training image, so a grader needs Docker and nothing else:
+# the host does not need numpy or pandas. Runs as the invoking user so the files it
+# writes into data/ stay owned by them.
+data: image ## Generate the default dataset (deterministic), inside the training image
+	@mkdir -p data
+	docker run --rm --user "$$(id -u):$$(id -g)" -e HOME=/tmp \
+	  -v "$$PWD/data:/app/data" \
+	  --entrypoint python \
+	  $(IMAGE):$(TAG) scripts/make_dataset.py --seed $(SEED)
 
 test: ## Run data contract and split property tests
 	pytest -q tests/
@@ -42,7 +49,7 @@ image-push: image ## Push to CONTAINER_REGISTRY via your adapter
 
 # The image runs as non-root uid 10001, which cannot write into a bind-mounted
 # reports/ owned by whoever cloned the repo. Open it up before mounting.
-reproduce: data image ## THE ONE COMMAND. Grader runs this.
+reproduce: image data ## THE ONE COMMAND. Grader runs this.
 	@mkdir -p reports && chmod a+rwx reports
 	docker run --rm \
 	  -v "$$PWD/data:/app/data:ro" \
