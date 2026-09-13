@@ -53,6 +53,7 @@ def main() -> None:
 
     df = data.load_raw(cfg.raw_path)
     fingerprint = data.data_fingerprint(cfg.raw_path)
+    dvc_md5 = data.dvc_hash(cfg.data_dir / "raw.dvc")
     train_df, val_df, test_df = data.split(df, seed=seed)
 
     mlflow.set_tracking_uri(cfg.mlflow_tracking_uri)
@@ -70,6 +71,7 @@ def main() -> None:
         mlflow.set_tags({
             "git_commit": git_commit(),
             "data_fingerprint": fingerprint,
+            "data_dvc_md5": dvc_md5,
             "split_strategy": "group_by_machine_id",
             "n_train_rows": len(train_df),
             "n_val_rows": len(val_df),

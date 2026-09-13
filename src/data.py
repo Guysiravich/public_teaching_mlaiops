@@ -11,6 +11,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import yaml
 
 TARGET = "failed_within_7d"
 GROUP = "machine_id"
@@ -67,6 +68,18 @@ def data_fingerprint(path: Path) -> str:
         for chunk in iter(lambda: fh.read(1 << 20), b""):
             h.update(chunk)
     return h.hexdigest()[:16]
+
+
+def dvc_hash(dvc_file: Path) -> str:
+    """DVC's content hash for a tracked output, read from its .dvc file.
+
+    Logged beside data_fingerprint so a run can be traced to the exact DVC version.
+    Returns "untracked" when the data is not under DVC.
+    """
+    if not dvc_file.exists():
+        return "untracked"
+    outs = (yaml.safe_load(dvc_file.read_text()) or {}).get("outs") or []
+    return str(outs[0].get("md5", "untracked")) if outs else "untracked"
 
 
 def split(
