@@ -35,6 +35,9 @@ library, so any `python` on the PATH will do.
 `make reproduce` fixes the seed (`20260101`), so the tolerance has to cover how much *the same run*
 can drift between machines — not how much the metric moves when the seed changes. A different seed
 reshuffles which machines land in the test split, which answers a different question.
+The course's repository guide says the same (`docs/REPO-GUIDE.md`, *Two things that will catch
+you out*): at this seed the reference run returns 0.8482 on any machine, while sweeping seeds
+moves it across 0.82–0.87.
 
 The same configuration and seed, run four times in two different environments:
 
@@ -219,5 +222,5 @@ image, as provided. The tracked runs above were made on the host and carry the r
 - [ ] Image builds for `linux/amd64` ✔ — **push pending** (`make image-push`, then fill in *Container image*)
 - [ ] `dvc push` completed — **pending**; remote configured and reachable
 - [x] Five or more tracked runs with params, metrics, data fingerprint, and commit SHA
-- [x] Every **REPLACE** block above is gone (the course-materials block at the top stays)
+- [x] Every instruction block from the template is gone (the course-materials block at the top stays)
 - [x] `git log -p | grep -i -E "secret|password|AKIA|BEGIN PRIVATE"` — the only matches are words in the course's own documentation and comments; no credential appears in history
