@@ -164,8 +164,15 @@ Azure, and the course guide installs it separately. It is imported lazily inside
 `make image-push` builds the image, pushes it through `cloudlayer/azure.py`, and prints the
 digest-pinned reference.
 
-**TODO (before submitting):** run `make image-push` and paste the digest reference it prints here,
-in the form `itcs3556688067.azurecr.io/itcs355/itcs355-lab1@sha256:…`.
+Pushed, pinned by digest:
+
+```
+itcs3556688067.azurecr.io/itcs355/itcs355-lab1@sha256:652ba7c6b54bbe2a9aa2a265c7eccbac9db2fc022c0ff9a0c14820c4e726794c
+```
+
+Built for `linux/amd64` from commit `70c551a`. The registry also carries the tag `70c551a`, but
+the digest is the reference to use: a tag can be moved, a digest cannot. `make reproduce` builds
+the image locally and does not pull this one.
 
 ---
 
@@ -194,16 +201,28 @@ repository) or create MLflow's `mlruns/` inside the root-owned `/app`, so the pr
 `make reproduce` failed on Linux. `make reproduce` now opens `reports/` before mounting it, and the
 `Dockerfile` gives `runner` ownership of `/app`. The container still runs as non-root.
 
-**The DVC remote is written in DVC's Azure form.** `.dvc/config` points at
-`azure://itcs355/itcs355/dvc` with `account_name = itcs3556688067` — the same location as
-`${BLOB_URI}/dvc`. The literal `https://…blob.core.windows.net/…` form is read by DVC as a plain
-HTTP remote that sends no Azure credentials, so `dvc push` to a private account cannot work with it.
+**Two DVC remotes, one location.** Both point at `${BLOB_URI}/dvc`:
 
-**The DVC remote is private, and `make reproduce` does not need it.** `dvc pull` requires an Azure
-identity with *Storage Blob Data Reader* on the storage account `itcs3556688067`; ask me and I will
-grant it. Without that access, `make reproduce` still works, because `make data` regenerates the
-exact dataset from the seed — the data fingerprint above, and `dvc status` reporting
-*Data and pipelines are up to date*, confirm it matches the tracked version.
+| Remote | URL | Used for |
+|---|---|---|
+| `public` (default) | `https://itcs3556688067.blob.core.windows.net/itcs355/itcs355/dvc` | `dvc pull` — anonymous read, no Azure account |
+| `storage` | `azure://itcs355/itcs355/dvc` with `account_name = itcs3556688067` | `dvc push -r storage` — writes, with the owner's Azure login |
+
+DVC reads an `https://` URL as a plain HTTP remote that sends no Azure credentials: fine for reading
+objects the account exposes, unable to write. DVC's Azure form carries credentials but does not fall
+back to anonymous access, so it is kept for pushing only.
+
+**`dvc pull` needs no Azure account.** From a fresh clone:
+
+```bash
+pip install "dvc[azure]==3.67.1"
+dvc pull
+```
+
+Tested from a fresh clone with no Azure login and no `cloud.env`: 2 files fetched in about
+7 seconds, and `data/raw/sensors.csv` is byte-identical to the tracked version. An anonymous visitor
+can read an object only by its exact path; listing the container returns `404`. `make reproduce`
+does not need `dvc pull` at all, because `make data` regenerates the same file from the seed.
 
 **The Git commit inside the container reads `unknown`.** `.dockerignore` excludes `.git` from the
 image, as provided. The tracked runs above were made on the host and carry the real commit SHA.
@@ -219,8 +238,8 @@ image, as provided. The tracked runs above were made on the host and carry the r
 - [x] `make verify` passes against the claim line
 - [x] `make test` — all tests pass
 - [x] `make portability-audit` — clean
-- [ ] Image builds for `linux/amd64` ✔ — **push pending** (`make image-push`, then fill in *Container image*)
-- [ ] `dvc push` completed — **pending**; remote configured and reachable
+- [x] Image builds for `linux/amd64` and is pushed, digest-pinned (see *Container image*)
+- [x] `dvc push` completed; a grader can `dvc pull` without an Azure account
 - [x] Five or more tracked runs with params, metrics, data fingerprint, and commit SHA
 - [x] Every instruction block from the template is gone (the course-materials block at the top stays)
 - [x] `git log -p | grep -i -E "secret|password|AKIA|BEGIN PRIVATE"` — the only matches are words in the course's own documentation and comments; no credential appears in history

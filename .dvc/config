@@ -1,6 +1,8 @@
 [core]
     analytics = false
-    remote = storage
+    remote = public
 ['remote "storage"']
     url = azure://itcs355/itcs355/dvc
     account_name = itcs3556688067
+['remote "public"']
+    url = https://itcs3556688067.blob.core.windows.net/itcs355/itcs355/dvc
