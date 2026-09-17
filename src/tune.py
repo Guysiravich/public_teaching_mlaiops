@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import itertools
 import json
+import os
 import time
 from pathlib import Path
 
@@ -25,13 +26,18 @@ from sklearn.metrics import average_precision_score, roc_auc_score
 from src import config, costs, data, seeds
 from src.train import git_commit
 
-# TODO(Lab 2): widen this. Three hyperparameters minimum, and vary something that
-# actually changes model behaviour rather than three variants of the same idea.
+# Three hyperparameters, each asking a different question about the model (Lab 2, Task 2):
+#   max_depth     how complex may one tree be?
+#   class_weight  how should the rare class (~12% failures) be weighted?
+#   max_features  how different should the trees be from one another?
+# max_depth and min_samples_leaf both answer the first question, so min_samples_leaf is held
+# fixed rather than varied. n_estimators mostly moves cost, not behaviour, so it is held too.
+FIXED_PARAMS: dict = {"n_estimators": 200, "min_samples_leaf": 5}
 SEARCH_SPACE: dict[str, list] = {
-    "n_estimators": [100, 300],
     "max_depth": [4, 8, 12],
-    "min_samples_leaf": [1, 5],
-}
+    "class_weight": [None, "balanced"],
+    "max_features": ["sqrt", 1.0],
+}  # 3 x 2 x 2 = 12 trials; keep --trials equal to the grid size
 
 
 def grid(space: dict[str, list]) -> list[dict]:
@@ -69,6 +75,7 @@ def main() -> None:
 
     df = data.load_raw(cfg.raw_path)
     fingerprint = data.data_fingerprint(cfg.raw_path)
+    dvc_md5 = data.dvc_hash(cfg.data_dir / "raw.dvc")
     train_df, val_df, test_df = data.split(df, seed=seed)
 
     mlflow.set_tracking_uri(cfg.mlflow_tracking_uri)
@@ -91,7 +98,7 @@ def main() -> None:
 
         started = time.perf_counter()
         with mlflow.start_run(run_name=f"trial-{i:02d}"):
-            model = RandomForestClassifier(random_state=seed, n_jobs=-1, **params)
+            model = RandomForestClassifier(random_state=seed, n_jobs=-1, **FIXED_PARAMS, **params)
             model.fit(train_df[data.FEATURES], train_df[data.TARGET])
 
             metrics = {}
@@ -104,7 +111,7 @@ def main() -> None:
             trial_cost = elapsed_h * rate
             state["spent_thb"] += trial_cost
 
-            mlflow.log_params({**params, "seed": seed, "instance": args.instance})
+            mlflow.log_params({**FIXED_PARAMS, **params, "seed": seed, "instance": args.instance})
             mlflow.log_metrics({
                 **metrics,
                 "duration_s": round(elapsed_h * 3600, 3),
@@ -113,6 +120,10 @@ def main() -> None:
             mlflow.set_tags({
                 "git_commit": git_commit(),
                 "data_fingerprint": fingerprint,
+                "data_version": dvc_md5,
+                # Set by the job submitter; "local" when the study runs on a laptop.
+                "training_job_id": os.environ.get("TRAINING_JOB_ID", "local"),
+                "image_digest": os.environ.get("IMAGE_DIGEST", "local"),
                 "lab": "2",
             })
             mlflow.sklearn.log_model(model, name="model")

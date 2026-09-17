@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -30,7 +31,9 @@ def git_commit() -> str:
         )
         return out.stdout.strip()
     except Exception:
-        return "unknown"
+        # Inside a managed job the image has no .git (see .dockerignore); the submitter
+        # passes the commit it built from.
+        return os.environ.get("GIT_COMMIT", "unknown")
 
 
 def parse_args() -> argparse.Namespace:

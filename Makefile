@@ -8,7 +8,7 @@ PLATFORM ?= linux/amd64
 SEED ?= 20260101
 
 .PHONY: help setup cloud-check data test portability-audit train image image-push reproduce verify clean teardown \
-        tune compare reload-check serve serve-image loadtest drift inject-drift pipeline cost swap-check llm-eval llm-gate
+        tune compare reload-check train-remote tune-remote serve serve-image loadtest drift inject-drift pipeline cost swap-check llm-eval llm-gate
 
 help:
 	@grep -E "^[a-zA-Z_-]+:.*?## .*$$" $(MAKEFILE_LIST) | awk -F":.*?## " "{printf \"  %-20s %s\\n\", \$$1, \$$2}"
@@ -76,6 +76,15 @@ compare: ## Rank runs by metric and by cost per point
 
 reload-check: ## Load the registered model by version and score rows
 	python scripts/reload_check.py --name $(MODEL_REGISTRY_NAME) --version $(VERSION)
+
+# The handout's `make train-remote` (Task 1). tune-remote runs the Task 2 study on the
+# same managed compute; reusing --output-name lets an interrupted study resume.
+train-remote: image ## Run training as a managed job on TRAINING_TARGET
+	python scripts/train_remote.py --image $(IMAGE):$(TAG)
+
+tune-remote: image ## Run the budgeted study as a managed, resumable job
+	python scripts/train_remote.py --image $(IMAGE):$(TAG) --module src.tune --output-name lab2-tune -- \
+	  --trials 12 --budget-thb 150 --instance Standard_DS2_v2 --checkpoint {output}/tune_checkpoint.json
 
 # --- Lab 3 -------------------------------------------------------------------
 serve: ## Run the inference service locally on :8080

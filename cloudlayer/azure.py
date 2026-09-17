@@ -58,6 +58,37 @@ def _run(cmd: list[str]) -> str:
     return result.stdout + result.stderr
 
 
+_POLL_SECONDS = 30
+_TRAINING_TARGET = re.compile(
+    r"^/subscriptions/(?P<sub>[^/]+)/resourceGroups/(?P<rg>[^/]+)"
+    r"/providers/Microsoft\.MachineLearningServices/workspaces/(?P<ws>[^/]+)"
+    r"/computes/(?P<compute>[^/]+)$",
+    re.IGNORECASE,
+)
+
+
+def _parse_training_target(target: str) -> tuple[str, str, str, str]:
+    """TRAINING_TARGET is the compute's resource ID; split it into its four names."""
+    m = _TRAINING_TARGET.match((target or "").strip())
+    if not m:
+        raise ValueError(
+            "TRAINING_TARGET must be an Azure ML compute resource ID: /subscriptions/<id>/"
+            "resourceGroups/<rg>/providers/Microsoft.MachineLearningServices/workspaces/<ws>/"
+            f"computes/<name>; got {target!r}"
+        )
+    return m["sub"], m["rg"], m["ws"], m["compute"]
+
+
+def _run_id_from_uri(model_uri: str) -> str:
+    """runs:/<run_id>/<path> -> <run_id>."""
+    if not model_uri.startswith("runs:/"):
+        raise ValueError(f"expected runs:/<run_id>/model, got {model_uri!r}")
+    run_id = model_uri[len("runs:/"):].split("/", 1)[0]
+    if not run_id:
+        raise ValueError(f"no run id in {model_uri!r}")
+    return run_id
+
+
 class AzureAdapter(CloudAdapter):
     def _blob_service(self, account: str) -> Any:
         # Imported here so selecting the adapter does not require the SDK to be installed.
@@ -107,7 +138,132 @@ class AzureAdapter(CloudAdapter):
             raise RuntimeError(f"`docker push` reported no digest for {remote_tag}:\n{output}")
         return f"{remote_repo}@{match.group(1)}"
 
-    # submit_training / register_model  -> Lab 2 (Azure ML command job + model registry)
+    # --- Lab 2 -------------------------------------------------------------------------
+
+    def _ml_client(self) -> tuple[Any, str]:
+        # Imported here so Lab 1 commands never need the Azure ML SDK installed.
+        from azure.ai.ml import MLClient
+        from azure.identity import DefaultAzureCredential
+
+        subscription, resource_group, workspace, compute = _parse_training_target(
+            self.cfg.training_target
+        )
+        client = MLClient(DefaultAzureCredential(), subscription, resource_group, workspace)
+        return client, compute
+
+    def submit_training(self, image_uri: str, args: dict[str, Any]) -> str:
+        """Run a module from the training image as an Azure ML command job.
+
+        args (all optional except where noted):
+          module      python module to run inside the image, e.g. "src.tune" (default "src.train")
+          arguments   list of CLI arguments; the token {output} becomes the job's output folder
+          data_uri    blob folder mounted read-only and copied to /app/data (default BLOB_URI/data)
+          output_uri  blob folder the job writes to; reuse it to resume a study (default per job)
+          env         extra environment variables (non-secret)
+          experiment  experiment name shown in Azure ML (default "itcs355")
+          lab         lab number for resource tags (default 2)
+        """
+        import shlex
+        import uuid
+
+        from azure.ai.ml import Input, Output, command
+        from azure.ai.ml.constants import AssetTypes, InputOutputModes
+        from azure.ai.ml.entities import Environment
+
+        client, compute = self._ml_client()
+        job_name = f"itcs355-{uuid.uuid4().hex[:12]}"
+        blob_root = self.cfg.blob_uri.rstrip("/")
+        data_uri = args.get("data_uri", f"{blob_root}/data")
+        output_uri = args.get("output_uri", f"{blob_root}/jobs/{job_name}")
+
+        module = args.get("module", "src.train")
+        arguments = " ".join(
+            shlex.quote(str(a)).replace("{output}", "${{outputs.output}}")
+            for a in args.get("arguments", [])
+        )
+        cmd = (
+            "mkdir -p /app/data && cp -r ${{inputs.data}}/. /app/data/ && "
+            f"cd /app && python -m {module} {arguments}"
+        ).strip()
+
+        env = {
+            "TRAINING_JOB_ID": job_name,
+            "IMAGE_DIGEST": image_uri.split("@", 1)[1] if "@" in image_uri else image_uri,
+            **{k: str(v) for k, v in args.get("env", {}).items()},
+        }
+        job = command(
+            name=job_name,
+            display_name=args.get("display_name", module),
+            experiment_name=args.get("experiment", "itcs355"),
+            command=cmd,
+            environment=Environment(image=image_uri),
+            compute=compute,
+            inputs={"data": Input(type=AssetTypes.URI_FOLDER, path=data_uri,
+                                  mode=InputOutputModes.RO_MOUNT)},
+            outputs={"output": Output(type=AssetTypes.URI_FOLDER, path=output_uri,
+                                      mode=InputOutputModes.RW_MOUNT)},
+            environment_variables=env,
+            tags=self.cfg.tags(int(args.get("lab", 2))),
+        )
+        submitted = client.jobs.create_or_update(job)
+        return submitted.name
+
+    def wait_training(self, job_id: str) -> dict[str, Any]:
+        """Poll the job until it reaches a terminal state. Returns its final status."""
+        import time
+
+        client, _ = self._ml_client()
+        terminal = {"Completed", "Failed", "Canceled", "NotResponding"}
+        last = None
+        while True:
+            job = client.jobs.get(job_id)
+            if job.status != last:
+                print(f"  {job_id}: {job.status}", flush=True)
+                last = job.status
+            if job.status in terminal:
+                return {
+                    "job_id": job_id,
+                    "status": job.status,
+                    "studio_url": getattr(job, "studio_url", None),
+                }
+            time.sleep(_POLL_SECONDS)
+
+    def register_model(self, model_uri: str, name: str) -> str:
+        """Register a tracked run's model and put its lineage ON THE VERSION.
+
+        The registry is the MLflow registry at MLFLOW_TRACKING_URI (self-hosted, reference §5).
+        model_uri is runs:/<run_id>/model. Every lineage field is copied from that run; if one
+        is missing, nothing is registered, because a version without lineage cannot answer
+        "which code, which data, which parameters".
+        """
+        import mlflow
+        from mlflow import MlflowClient
+
+        mlflow.set_tracking_uri(self.cfg.mlflow_tracking_uri)
+        client = MlflowClient()
+        run_id = _run_id_from_uri(model_uri)
+        run = client.get_run(run_id)
+        tags, params, metrics = run.data.tags, run.data.params, run.data.metrics
+
+        lineage = {
+            "git_commit": tags.get("git_commit"),
+            "data_version": tags.get("data_version"),
+            "mlflow_run_id": run_id,
+            "training_job_id": tags.get("training_job_id"),
+            "image_digest": tags.get("image_digest"),
+            "seed": params.get("seed"),
+            "metric_val": metrics.get("val_roc_auc"),
+            "metric_test": metrics.get("test_roc_auc"),
+        }
+        missing = sorted(k for k, v in lineage.items() if v in (None, "", "unknown"))
+        if missing:
+            raise ValueError(f"run {run_id} lacks lineage fields {missing}; not registering")
+
+        version = mlflow.register_model(model_uri, name)
+        for key, value in lineage.items():
+            client.set_model_version_tag(name, version.version, key, str(value))
+        return str(version.version)
+
     # deploy / invoke                   -> Lab 3 (managed online endpoint + deployment)
     # emit_metric                       -> Lab 4 (Azure Monitor custom metric)
     # generate                          -> Lab 5 (managed LLM endpoint; read the usage block for tokens)

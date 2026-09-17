@@ -49,6 +49,8 @@ def main() -> int:
         "n_estimators": runs.get("params.n_estimators"),
         "max_depth": runs.get("params.max_depth"),
         "min_samples_leaf": runs.get("params.min_samples_leaf"),
+        "class_weight": runs.get("params.class_weight"),
+        "max_features": runs.get("params.max_features"),
     })
     gain = (table[args.metric] - baseline).clip(lower=1e-9)
     table["thb_per_point"] = (table["cost_thb"] / (gain * 100)).round(4)

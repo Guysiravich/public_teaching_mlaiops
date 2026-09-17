@@ -19,10 +19,16 @@ PRICE_TABLE: dict[str, dict[str, float]] = {
         "ml.c5.xlarge": 7.3,
         "ml.g4dn.xlarge": 26.0,
     },
+    # Azure, VERIFIED for eastasia on 2026-09-15: Azure Retail Prices API
+    # (prices.azure.com, Linux, pay-as-you-go) x 33.234 THB/USD (open.er-api.com, same day).
+    #   Standard_DS2_v2       0.2140 USD/h  added: the instance this study runs on
+    #   Standard_DS3_v2       0.4280 USD/h  was 8.1 THB/h
+    #   Standard_F4s_v2       0.2160 USD/h  was 6.9 THB/h
+    #   Standard_NC4as_T4_v3  not offered in eastasia; removed (was 24.5 THB/h)
     "azure": {
-        "Standard_DS3_v2": 8.1,
-        "Standard_F4s_v2": 6.9,
-        "Standard_NC4as_T4_v3": 24.5,
+        "Standard_DS2_v2": 7.11,
+        "Standard_DS3_v2": 14.22,
+        "Standard_F4s_v2": 7.18,
     },
     "gcp": {
         "n1-standard-4": 7.6,
