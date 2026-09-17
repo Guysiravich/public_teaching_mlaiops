@@ -23,3 +23,7 @@ __pycache__/
 
 # ruff cache
 .ruff_cache/
+
+# Tracking server secrets (Lab 2). Never commit.
+infra/tracking-server/.env
+infra/tracking-server/auth.caddy

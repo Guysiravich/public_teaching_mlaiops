@@ -1,0 +1,65 @@
+# Self-hosted MLflow tracking server (reference §5), for a single small VM.
+#
+#   postgres  backend store: params, metrics, tags, registry  (cloud.env.example: "a database
+#             backend on a server")
+#   mlflow    the tracking server; artifacts are served through it and stored at
+#             ARTIFACTS_DESTINATION (${BLOB_URI}/mlruns in wasbs form on Azure)
+#   caddy     HTTPS and a password in front of mlflow; the only service with open ports
+#
+# Secrets live in .env and auth.caddy, both gitignored. Create them with ./make_secrets.sh.
+
+services:
+  postgres:
+    image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+    environment:
+      POSTGRES_USER: mlflow
+      POSTGRES_DB: mlflow
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mlflow -d mlflow"]
+      interval: 5s
+      retries: 20
+    restart: unless-stopped
+
+  mlflow:
+    build: .
+    command:
+      - --host=0.0.0.0
+      - --port=5000
+      - --workers=1
+      - --backend-store-uri=postgresql+psycopg2://mlflow:${POSTGRES_PASSWORD}@postgres:5432/mlflow
+      - --serve-artifacts
+      - --artifacts-destination=${ARTIFACTS_DESTINATION:?set ARTIFACTS_DESTINATION in .env}
+      - --allowed-hosts=${MLFLOW_HOSTNAME:?set MLFLOW_HOSTNAME in .env},${MLFLOW_HOSTNAME}:*
+    volumes:
+      - artifacts:/artifacts        # used only when ARTIFACTS_DESTINATION is a local path
+    environment:
+      # MLflow 3 starts ~8 background job workers (~220 MB each) for features this course
+      # does not use; the VM has 1 GB. Tracking, artifacts and the registry are unaffected.
+      MLFLOW_SERVER_ENABLE_JOB_EXECUTION: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
+    environment:
+      MLFLOW_HOSTNAME: ${MLFLOW_HOSTNAME}
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./auth.caddy:/etc/caddy/auth.caddy:ro
+      - caddy_data:/data
+    depends_on:
+      - mlflow
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  artifacts:
+  caddy_data:

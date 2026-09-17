@@ -1,0 +1,6 @@
+# HTTPS for MLFLOW_HOSTNAME (a public certificate on the VM; a local one for localhost),
+# a username and password on every request, then pass through to the tracking server.
+{$MLFLOW_HOSTNAME} {
+	import /etc/caddy/auth.caddy
+	reverse_proxy mlflow:5000
+}
