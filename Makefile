@@ -8,7 +8,7 @@ PLATFORM ?= linux/amd64
 SEED ?= 20260101
 
 .PHONY: help setup cloud-check data test portability-audit train image image-push reproduce verify clean teardown \
-        tune compare reload-check train-remote tune-remote serve serve-image loadtest drift inject-drift pipeline cost swap-check llm-eval llm-gate
+        tune compare reload-check train-remote tune-remote seeds-remote serve serve-image loadtest drift inject-drift pipeline cost swap-check llm-eval llm-gate
 
 help:
 	@grep -E "^[a-zA-Z_-]+:.*?## .*$$" $(MAKEFILE_LIST) | awk -F":.*?## " "{printf \"  %-20s %s\\n\", \$$1, \$$2}"
@@ -85,6 +85,10 @@ train-remote: image ## Run training as a managed job on TRAINING_TARGET
 tune-remote: image ## Run the budgeted study as a managed, resumable job
 	python scripts/train_remote.py --image $(IMAGE):$(TAG) --module src.tune --output-name lab2-tune -- \
 	  --trials 12 --budget-thb 150 --instance Standard_DS2_v2 --checkpoint {output}/tune_checkpoint.json
+
+seeds-remote: image ## Seed variance of the study's top trials, as a managed job
+	python scripts/train_remote.py --image $(IMAGE):$(TAG) --module src.seed_variance -- \
+	  --top 3 --seeds 5 --instance Standard_DS2_v2
 
 # --- Lab 3 -------------------------------------------------------------------
 serve: ## Run the inference service locally on :8080
