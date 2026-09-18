@@ -33,7 +33,10 @@ def main() -> int:
         print(f"No experiment named {args.experiment!r}. Run `make tune` first.")
         return 1
 
-    runs = mlflow.search_runs(experiment_ids=[exp.experiment_id])
+    # Finished trials only: a trial cut off by an interruption is marked KILLED and its
+    # re-run from the checkpoint is the one that counts.
+    runs = mlflow.search_runs(experiment_ids=[exp.experiment_id],
+                              filter_string="attributes.status = 'FINISHED'")
     if runs.empty:
         print("No runs found.")
         return 1
