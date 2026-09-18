@@ -11,6 +11,7 @@ the adapter, and waits for it. Provider-neutral: every cloud call goes through t
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -69,6 +70,12 @@ def main() -> int:
             "GIT_COMMIT": commit,
         },
     }
+    # The tracking server's password reaches the job at submission time, from the local
+    # cloud.env; it is never in Git or in an image layer. Lab 2 limitation: the job's
+    # definition shows it to anyone with access to the workspace. Lab 4 moves it to Key Vault.
+    for key in ("MLFLOW_TRACKING_USERNAME", "MLFLOW_TRACKING_PASSWORD"):
+        if os.environ.get(key):
+            job_args["env"][key] = os.environ[key]
     if args.output_name:
         job_args["output_uri"] = f"{cfg.blob_uri.rstrip('/')}/jobs/{args.output_name}"
 

@@ -9,7 +9,7 @@
 #   - system-assigned identity with Storage Blob Data Contributor on the course storage account,
 #     so the server can write artifacts without a storage key
 #   - a daily auto-shutdown, so a forgotten server stops billing compute overnight
-# The VM installs Docker and clones the repository on first boot (cloud-init below).
+# The VM installs Docker on first boot (cloud-init below); this folder is copied to it with scp.
 # Deallocate it whenever you are not using it:  az vm deallocate -g <rg> -n <vm>
 set -euo pipefail
 
@@ -18,7 +18,6 @@ REGION="${REGION:-eastasia}"
 VM="${VM:-itcs355-mlflow}"
 DNS_LABEL="${DNS_LABEL:-itcs3556688067-mlflow}"
 STORAGE="${STORAGE:-itcs3556688067}"
-REPO_URL="${REPO_URL:-https://github.com/Guysiravich/public_teaching_mlaiops.git}"
 SHUTDOWN_UTC="${SHUTDOWN_UTC:-1600}"      # 16:00 UTC = 23:00 in Bangkok
 TAGS=(course=itcs355 student=6688067 lab=2)
 
@@ -27,13 +26,11 @@ CLOUD_INIT="$(mktemp)"
 cat > "$CLOUD_INIT" <<YAML
 #cloud-config
 package_update: true
-packages: [docker.io, docker-compose-v2, git]
+packages: [docker.io, docker-compose-v2]
 runcmd:
   - fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
   - echo '/swapfile none swap sw 0 0' >> /etc/fstab
   - usermod -aG docker azureuser
-  - git clone ${REPO_URL} /home/azureuser/itcs355
-  - chown -R azureuser:azureuser /home/azureuser/itcs355
 YAML
 
 echo "== VM =="
@@ -73,9 +70,10 @@ rm -f "$CLOUD_INIT"
 cat <<NEXT
 
 Provisioned. Server hostname: ${FQDN}
-Next, from this machine:
+Next, from the repository root on this machine:
+  scp -r infra/tracking-server azureuser@${FQDN}:
   ssh azureuser@${FQDN}
-  cd itcs355/infra/tracking-server
+  cd tracking-server
   ./make_secrets.sh ${FQDN} wasbs://itcs355@${STORAGE}.blob.core.windows.net/itcs355/mlruns
   docker compose up -d --build
 Then set in your local cloud.env:
