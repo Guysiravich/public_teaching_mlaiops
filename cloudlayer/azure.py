@@ -59,6 +59,8 @@ def _run(cmd: list[str]) -> str:
 
 
 _POLL_SECONDS = 30
+# The Azure CLI can take over 10 s (the SDK default) to refresh a token from WSL.
+_CLI_TIMEOUT_SECONDS = 60
 _TRAINING_TARGET = re.compile(
     r"^/subscriptions/(?P<sub>[^/]+)/resourceGroups/(?P<rg>[^/]+)"
     r"/providers/Microsoft\.MachineLearningServices/workspaces/(?P<ws>[^/]+)"
@@ -97,7 +99,7 @@ class AzureAdapter(CloudAdapter):
 
         return BlobServiceClient(
             account_url=f"https://{account}{_BLOB_HOST_SUFFIX}",
-            credential=DefaultAzureCredential(),
+            credential=DefaultAzureCredential(process_timeout=_CLI_TIMEOUT_SECONDS),
         )
 
     def upload(self, local_path: str, key: str) -> str:
@@ -148,7 +150,7 @@ class AzureAdapter(CloudAdapter):
         subscription, resource_group, workspace, compute = _parse_training_target(
             self.cfg.training_target
         )
-        client = MLClient(DefaultAzureCredential(), subscription, resource_group, workspace)
+        client = MLClient(DefaultAzureCredential(process_timeout=_CLI_TIMEOUT_SECONDS), subscription, resource_group, workspace)
         return client, compute
 
     def submit_training(self, image_uri: str, args: dict[str, Any]) -> str:
