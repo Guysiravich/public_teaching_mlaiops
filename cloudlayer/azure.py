@@ -200,6 +200,16 @@ class AzureAdapter(CloudAdapter):
             "IMAGE_DIGEST": image_uri.split("@", 1)[1] if "@" in image_uri else image_uri,
             **{k: str(v) for k, v in args.get("env", {}).items()},
         }
+        # Azure ML overwrites MLFLOW_TRACKING_URI in every job with its own azureml:// store and
+        # adds MLFLOW_RUN_ID / MLFLOW_EXPERIMENT_* for it. Pass our server under another name and
+        # restore it inside the job, so runs reach the self-hosted server (reference section 5).
+        if "MLFLOW_TRACKING_URI" in env:
+            env["ITCS355_MLFLOW_TRACKING_URI"] = env.pop("MLFLOW_TRACKING_URI")
+            cmd = (
+                'export MLFLOW_TRACKING_URI="$ITCS355_MLFLOW_TRACKING_URI" && '
+                "unset MLFLOW_RUN_ID MLFLOW_EXPERIMENT_ID MLFLOW_EXPERIMENT_NAME MLFLOW_TRACKING_TOKEN && "
+                + cmd
+            )
         job = command(
             name=job_name,
             display_name=args.get("display_name", module),
