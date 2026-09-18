@@ -4,7 +4,8 @@
 #   ./provision_azure.sh
 #
 # Creates, all tagged course=itcs355 student=<id> lab=2:
-#   - Ubuntu 24.04 VM, Standard_B1s, public DNS name <DNS_LABEL>.<REGION>.cloudapp.azure.com
+#   - Ubuntu 24.04 VM, Standard_B2ats_v2 (2 vCPU, 1 GB; B1s is not offered in eastasia),
+#     standard HDD OS disk, public DNS name <DNS_LABEL>.<REGION>.cloudapp.azure.com
 #   - inbound 80/443 open (HTTPS + certificate issuance); SSH only from this machine's IP
 #   - system-assigned identity with Storage Blob Data Contributor on the course storage account,
 #     so the server can write artifacts without a storage key
@@ -16,6 +17,7 @@ set -euo pipefail
 RG="${RG:-itcs355-6688067}"
 REGION="${REGION:-eastasia}"
 VM="${VM:-itcs355-mlflow}"
+SIZE="${SIZE:-Standard_B2ats_v2}"   # ~0.44 THB/h in eastasia (Retail Prices API, 2026-09-18)
 DNS_LABEL="${DNS_LABEL:-itcs3556688067-mlflow}"
 STORAGE="${STORAGE:-itcs3556688067}"
 SHUTDOWN_UTC="${SHUTDOWN_UTC:-1600}"      # 16:00 UTC = 23:00 in Bangkok
@@ -35,7 +37,7 @@ YAML
 
 echo "== VM =="
 az vm create -g "$RG" -n "$VM" -l "$REGION" \
-  --image Ubuntu2404 --size Standard_B1s \
+  --image Ubuntu2404 --size "$SIZE" --storage-sku Standard_LRS \
   --admin-username azureuser --generate-ssh-keys \
   --public-ip-sku Standard --public-ip-address-dns-name "$DNS_LABEL" \
   --assign-identity '[system]' \
