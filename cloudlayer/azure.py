@@ -48,6 +48,13 @@ def _blob_url(account: str, container: str, path: str) -> str:
     return f"https://{account}{_BLOB_HOST_SUFFIX}/{container}/{path}"
 
 
+def _job_uri(uri: str) -> str:
+    """BLOB_URI form -> the form Azure ML jobs accept. Azure ML treats https:// as public,
+    read-only storage and rejects it as an output (NotSupportedAssetOutputUri)."""
+    account, container, path = _parse_blob_uri(uri)
+    return f"wasbs://{container}@{account}{_BLOB_HOST_SUFFIX}/{path}"
+
+
 def _run(cmd: list[str]) -> str:
     """Run a CLI command; raise with its output if it fails."""
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -200,9 +207,9 @@ class AzureAdapter(CloudAdapter):
             command=cmd,
             environment=Environment(image=image_uri),
             compute=compute,
-            inputs={"data": Input(type=AssetTypes.URI_FOLDER, path=data_uri,
+            inputs={"data": Input(type=AssetTypes.URI_FOLDER, path=_job_uri(data_uri),
                                   mode=InputOutputModes.RO_MOUNT)},
-            outputs={"output": Output(type=AssetTypes.URI_FOLDER, path=output_uri,
+            outputs={"output": Output(type=AssetTypes.URI_FOLDER, path=_job_uri(output_uri),
                                       mode=InputOutputModes.RW_MOUNT)},
             environment_variables=env,
             tags=self.cfg.tags(int(args.get("lab", 2))),
