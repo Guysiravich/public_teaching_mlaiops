@@ -408,8 +408,21 @@ month, the container registry about 165 THB a month. Retraining is under 1% of t
 **Promotion.** The chosen version is promoted with the MLflow alias `staging` (`make promote`);
 MLflow 3 uses aliases in place of the old stages.
 
-«fill (author's decision): who, in a real organisation, may promote staging → production, and what
-evidence they must see»
+**Who may promote staging → production.** Not the person who trained the model: promotion needs
+a second pair of eyes. In a real organisation it belongs to the owner of the production service,
+the ML platform or MLOps lead, with sign-off from the maintenance operations manager, because the
+scores decide where technicians are sent. Before promoting they should require:
+
+1. **Lineage complete on the version** (commit, data version, image digest, seed), and a rebuild
+   from those that reproduces the metric within tolerance.
+2. **Evaluation on data newer than the tuning set.** ROC-AUC no worse than the current production
+   model by more than seed noise (about 0.002), and calibration checked: Brier score, and the
+   predicted against the actual failure rate.
+3. **The operating threshold agreed with maintenance**, with the inspections per week it implies
+   and the recall at that threshold. Not the default 0.5, which here would catch 5% of failures.
+4. **`reload_check.py` passing from the registry** inside the serving image.
+5. **A rollback.** The previous production version stays registered, and moving the alias back is
+   one command.
 
 ## Notes for the grader — Lab 2
 
