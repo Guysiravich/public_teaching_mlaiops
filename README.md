@@ -357,6 +357,26 @@ Students subscription has an Azure ML low-priority vCPU quota of 0
 which are not pre-empted. The interruption is therefore simulated by cancelling the job.
 `compare_runs.py` lists `FINISHED` runs only, so the cut-off trial is not counted twice.
 
+Evidence from the jobs' own logs (Azure ML `user_logs/std_log.txt`). The second job skips what the
+checkpoint holds, and its running spend continues from the first job's 0.0076 THB:
+
+```
+itcs355-7b68899ff665 (interrupted)
+trial 0: {'max_depth': 4, 'class_weight': None, 'max_features': 'sqrt'} -> val_roc_auc=0.8405 cost=0.0016 THB  cumulative=0.0016
+...
+trial 3: {'max_depth': 4, 'class_weight': 'balanced', 'max_features': 1.0} -> val_roc_auc=0.8307 cost=0.0023 THB  cumulative=0.0076
+
+itcs355-a78b2fedff1c (resubmitted)
+trial 0: already done, skipping (resumed from checkpoint)
+trial 1: already done, skipping (resumed from checkpoint)
+trial 2: already done, skipping (resumed from checkpoint)
+trial 3: already done, skipping (resumed from checkpoint)
+trial 4: {'max_depth': 8, 'class_weight': None, 'max_features': 'sqrt'} -> val_roc_auc=0.8364 cost=0.0022 THB  cumulative=0.0099
+...
+trial 11: {'max_depth': 12, 'class_weight': 'balanced', 'max_features': 1.0} -> val_roc_auc=0.8150 cost=0.0035 THB  cumulative=0.0296
+spent 0.0296 of 150.0 THB
+```
+
 ## Seed variance (Task 3)
 
 `make seeds-remote` (job `itcs355-7ef754377692`) refits the study's top 3 configurations with 5 model
@@ -476,3 +496,16 @@ scores decide where technicians are sent. Before promoting they should require:
   handout says.
 - **Cloud:** Azure, region `eastasia`. The smallest general-purpose size, `Standard_B1s`, is not offered there;
   the server uses `Standard_B2ats_v2`, about the same price.
+
+## Checklist before you submit — Lab 2
+
+- [x] `submit_training()` and `wait_training()` implemented and working — `cloudlayer/azure.py`; jobs listed above
+- [ ] 12+ trials on discounted compute, checkpointed, all tracked — 12 trials, checkpointed and tracked, but on **dedicated** compute: the subscription's low-priority quota is 0 (see *Study, interruption and resume*)
+- [x] Interruption survived and resumed — evidence in logs (simulated by cancelling; see above)
+- [x] Comparison artifact in `reports/` — `reports/lab2-comparison.md`
+- [x] 200-word justification covering all four required points — in the same file
+- [x] Model registered with all eight lineage fields — `itcs355-6688067` version 1
+- [x] Promotion step performed, with a note on who should own it — alias `staging`
+- [x] `reload_check.py` runs from the registry and scores rows — tested from a fresh clone
+- [x] Cost recorded per trial, total under 150 THB — 0.0296 THB of fitting; 9.8 THB billed for the whole lab
+- [ ] `make teardown` run — not run: `teardown()` is Lab 5 work in `base.py`. The cluster scales itself to zero, the tracking VM is deallocated after grading, and the registered model stays for Lab 3
