@@ -278,7 +278,8 @@ The submitting machine needs `TRAINING_TARGET`, `MLFLOW_TRACKING_URI`, `MLFLOW_T
   release (1.62.0.post6) requires `mlflow-skinny<=3.15.0`, below the course pin. Downgrading would
   also leave the Lab 1 tracking database unreadable: its schema is newer than 3.15 understands.
 - **Cost of the choice.** A VM billed by the hour, plus a static IP and a disk billed all the time
-  (see *Compute and cost*). The VM is deallocated when not in use and shuts down daily at 23:00.
+  (see *Compute and cost*). The VM is deallocated when not in use; its daily 23:00 auto-shutdown is
+  switched off while Lab 2 is being graded, so the registry stays reachable.
 
 Three differences from the §5 example, each forced by hosting it for a managed job:
 
@@ -399,13 +400,30 @@ About 10 minutes of node time per job from a cold start, about 1.2 THB, against 
 hour of tracking server (0.44 THB). The standing costs dominate: static IP and disk about 175 THB a
 month, the container registry about 165 THB a month. Retraining is under 1% of the monthly bill.
 
-**Total spend for Lab 2.** «fill: from Azure Cost Management once posted»
+**Total spend for Lab 2.** Azure Cost Management, as posted on 19 September 2026: **9.8 THB** (virtual machines, which include the training nodes, 4.50; network and static IP 2.80; storage 2.47), against the 150 THB budget. The container registry from Lab 1 adds about 5.5 THB a day on top. Postings lag by up to a day, and the tracking server keeps running while Lab 2 is graded.
 
 ## Registered model and promotion (Task 4)
 
-«fill: registered name/version, run ID, and the eight lineage fields from `make register`»
+**`itcs355-6688067` version 1**, from run `a51929352ced426ea7f9dc6fb27841fc` (trial-00: max_depth 4,
+class_weight None, max_features sqrt). Registered with `make register RUN_ID=a51929352ced426ea7f9dc6fb27841fc`.
+The adapter copies the lineage onto the model **version**, not only the run, and refuses to register
+if any field is missing:
 
-**Promotion.** The chosen version is promoted with the MLflow alias `staging` (`make promote`);
+| Field | Value |
+|---|---|
+| `git_commit` | `4bb88f97798789cdcb331adc4284d35ebb138d83` (the commit the study job ran) |
+| `data_version` | `1c886b512c8a5c9bf723da1cd119fc80.dir` (DVC md5 of `data/raw`) |
+| `mlflow_run_id` | `a51929352ced426ea7f9dc6fb27841fc` |
+| `training_job_id` | `itcs355-7b68899ff665` (Azure ML job) |
+| `image_digest` | `sha256:f0253d25002cc08736957b396dfce578e6a363ff55aabc3df0788f10782ef7db` |
+| `seed` | `20260101` |
+| `metric_val` | `0.8404552730949226` (val ROC-AUC) |
+| `metric_test` | `0.8543112516622451` (test ROC-AUC) |
+
+MLflow 3 logs models as logged-model objects, so the version's `source` is
+`models:/m-604f180487784f819a6361ba22b7fa1e`; its `run_id` still points at the run above.
+
+**Promotion.** Version 1 is promoted with the MLflow alias `staging` (`make promote VERSION=1`);
 MLflow 3 uses aliases in place of the old stages.
 
 **Who may promote staging → production.** Not the person who trained the model: promotion needs
@@ -428,7 +446,24 @@ scores decide where technicians are sent. Before promoting they should require:
 
 - **Registry access.** `reload_check.py` needs `MLFLOW_TRACKING_URI`, `MLFLOW_TRACKING_USERNAME` and
   `MLFLOW_TRACKING_PASSWORD`; the credentials are shared privately, never in Git.
-  «fill: when the server will be up»
+  **The server stays up continuously from Saturday 19 September 2026 until at least the end of
+  Session 3 (Monday 21 September).** After that it is started on request, in about two minutes.
+  Tested from a fresh clone with no `cloud.env` and only those three variables:
+
+  ```
+  $ python scripts/reload_check.py --name itcs355-6688067 --version 1
+  loading models:/itcs355-6688067/1
+    reading 125: p(failure)=0.0203
+    reading 126: p(failure)=0.0658
+    reading 127: p(failure)=0.0293
+    reading 128: p(failure)=0.0262
+    reading 129: p(failure)=0.0137
+
+  PASS  model reloaded from the registry and scored rows
+  ```
+
+  Without the password the same command fails with HTTP 401. `data/raw/sensors.csv` must exist
+  first (`make data` or `dvc pull`), because `reload_check.py` scores rows from the local test split.
 - **Commands the handout names but the Makefile lacked.** `make train-remote` is added;
   `make tune-remote`, `make seeds-remote`, `make register` and `make promote` are added for the
   study, the seed runs and Task 4. `make cost-report` does not exist; spend is taken from Azure Cost
