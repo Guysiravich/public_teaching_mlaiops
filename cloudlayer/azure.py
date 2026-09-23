@@ -16,6 +16,7 @@ Hints for Lab 1:
 """
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -96,6 +97,30 @@ def _run_id_from_uri(model_uri: str) -> str:
     if not run_id:
         raise ValueError(f"no run id in {model_uri!r}")
     return run_id
+
+
+# Lab 3. Azure ML managed online endpoints are unavailable on Azure for Students: they need
+# ceil(1.2 x instances) x cores of quota, so one Standard_DS3_v2 asks for 8 vCPU against a cap
+# of about 3 that cannot be raised (getting-started-azure.md). The container goes to Azure
+# Container Apps instead: no Azure ML core quota, scales to zero, consumption pricing.
+_CONTAINER_APP_ENV = "itcs355-env"
+_SERVE_PORT = 8080
+
+
+def _parse_model_ref(model_ref: str) -> tuple[str, str]:
+    """models:/<name>/<version> -> (name, version)."""
+    match = re.fullmatch(r"models:/([^/]+)/(\w+)", model_ref)
+    if not match:
+        raise ValueError(f"Expected models:/<name>/<version>, got {model_ref!r}")
+    return match.group(1), match.group(2)
+
+
+def _parse_instance(instance: str) -> tuple[str, str]:
+    """"0.5/1.0Gi" -> ("0.5", "1.0Gi"). The provider's unit of size, as Azure ML took a VM SKU."""
+    cpu, _, memory = instance.partition("/")
+    if not cpu or not memory:
+        raise ValueError(f"Expected <cpu>/<memory>, for example 0.5/1.0Gi, got {instance!r}")
+    return cpu, memory
 
 
 class AzureAdapter(CloudAdapter):
@@ -248,6 +273,111 @@ class AzureAdapter(CloudAdapter):
             time.sleep(_POLL_SECONDS)
 
     # --- Lab 3 ---------------------------------------------------------------
+    def deploy(self, model_ref: str, endpoint: str, instance: str) -> str:
+        """Deploy the serving image as a Container Apps revision. Returns the endpoint URL.
+
+        model_ref  models:/<name>/<version> — the version the container loads at startup
+        endpoint   container app name
+        instance   "<cpu>/<memory>", e.g. "0.5/1.0Gi"
+
+        The image comes from SERVE_IMAGE (digest-pinned, as Lab 1 requires), the registry is
+        read with a user-assigned identity rather than a registry password, and the tracking
+        server's credentials are Container Apps secrets, never plain environment values.
+        """
+        import json
+        import tempfile
+
+        name, version = _parse_model_ref(model_ref)
+        cpu, memory = _parse_instance(instance)
+        image = os.environ["SERVE_IMAGE"]
+        identity = os.environ["SERVE_IDENTITY_ID"]
+        group = self.cfg.project_id
+        registry = self.cfg.container_registry.split("/")[0]
+        tags = self.cfg.tags(3)
+
+        existing = _run(["az", "containerapp", "env", "list", "-g", group,
+                         "--query", f"[?name=='{_CONTAINER_APP_ENV}'].name", "-o", "tsv"]).strip()
+        if not existing:
+            _run(["az", "containerapp", "env", "create", "-g", group, "-n", _CONTAINER_APP_ENV,
+                  "-l", self.cfg.region, "--logs-destination", "none",
+                  "--tags", *[f"{k}={v}" for k, v in tags.items()], "-o", "none"])
+
+        env_id = _run(["az", "containerapp", "env", "show", "-g", group, "-n", _CONTAINER_APP_ENV,
+                       "--query", "id", "-o", "tsv"]).strip()
+        spec = {
+            "location": self.cfg.region,
+            "tags": tags,
+            "identity": {"type": "UserAssigned", "userAssignedIdentities": {identity: {}}},
+            "properties": {
+                "environmentId": env_id,
+                "configuration": {
+                    # Multiple, so Task 4 can put a canary beside the current revision.
+                    "activeRevisionsMode": "Multiple",
+                    "ingress": {"external": True, "targetPort": _SERVE_PORT, "transport": "auto"},
+                    "registries": [{"server": registry, "identity": identity}],
+                    "secrets": [
+                        {"name": "mlflow-username", "value": os.environ["MLFLOW_TRACKING_USERNAME"]},
+                        {"name": "mlflow-password", "value": os.environ["MLFLOW_TRACKING_PASSWORD"]},
+                    ],
+                },
+                "template": {
+                    "revisionSuffix": f"v{version}",
+                    "containers": [{
+                        "name": "predict",
+                        "image": image,
+                        "resources": {"cpu": float(cpu), "memory": memory},
+                        "env": [
+                            {"name": "MODEL_REGISTRY_NAME", "value": name},
+                            {"name": "MODEL_VERSION", "value": version},
+                            {"name": "MLFLOW_TRACKING_URI", "value": self.cfg.mlflow_tracking_uri},
+                            {"name": "MLFLOW_TRACKING_USERNAME", "secretRef": "mlflow-username"},
+                            {"name": "MLFLOW_TRACKING_PASSWORD", "secretRef": "mlflow-password"},
+                        ],
+                        # Liveness and readiness are different questions: the process is up,
+                        # against the model is loaded and can score. Routing traffic on the
+                        # first one is the bug the lab is about.
+                        "probes": [
+                            {"type": "Liveness", "httpGet": {"path": "/health", "port": _SERVE_PORT},
+                             "initialDelaySeconds": 5, "periodSeconds": 10},
+                            {"type": "Readiness", "httpGet": {"path": "/ready", "port": _SERVE_PORT},
+                             "initialDelaySeconds": 3, "periodSeconds": 5, "failureThreshold": 30},
+                        ],
+                    }],
+                    "scale": {"minReplicas": int(os.environ.get("SERVE_MIN_REPLICAS", "1")),
+                              "maxReplicas": int(os.environ.get("SERVE_MAX_REPLICAS", "1"))},
+                },
+            },
+        }
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as handle:
+            json.dump(spec, handle)
+            spec_path = handle.name
+
+        exists = _run(["az", "containerapp", "list", "-g", group,
+                       "--query", f"[?name=='{endpoint}'].name", "-o", "tsv"]).strip()
+        verb = "update" if exists else "create"
+        _run(["az", "containerapp", verb, "-g", group, "-n", endpoint, "--yaml", spec_path, "-o", "none"])
+
+        fqdn = _run(["az", "containerapp", "show", "-g", group, "-n", endpoint,
+                     "--query", "properties.configuration.ingress.fqdn", "-o", "tsv"]).strip()
+        return f"https://{fqdn}"
+
+    def invoke(self, endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Call the deployed service once. `endpoint` is the URL deploy() returned."""
+        import json
+        import urllib.request
+
+        route = "/predict/batch" if "rows" in payload else "/predict"
+        request = urllib.request.Request(
+            endpoint.rstrip("/") + route,
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(request, timeout=30) as response:
+            body = json.loads(response.read())
+            body["model_version_header"] = response.headers.get("x-model-version", "")
+            return body
+
+    # --- Lab 5 (teardown is used by Lab 3's handout too) ------------------------
     def teardown(self, tags: dict[str, str], dry_run: bool = False) -> list[str]:
         """Delete every resource carrying ALL of these tags. Returns what was deleted.
 
@@ -303,7 +433,7 @@ class AzureAdapter(CloudAdapter):
             client.set_model_version_tag(name, version.version, key, str(value))
         return str(version.version)
 
-    # deploy / invoke                   -> Lab 3 (managed online endpoint + deployment)
+    # deploy / invoke                   -> Lab 3 (Container Apps revision + HTTP call)
     # emit_metric                       -> Lab 4 (Azure Monitor custom metric)
     # generate                          -> Lab 5 (managed LLM endpoint; read the usage block for tokens)
     # teardown                          -> Lab 5 (resource graph query by tag)

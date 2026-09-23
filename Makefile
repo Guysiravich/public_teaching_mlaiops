@@ -6,12 +6,15 @@ IMAGE ?= itcs355-lab1
 TAG   ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 PLATFORM ?= linux/amd64
 SEED ?= 20260101
+INSTANCE ?= 0.5/1.0Gi
+MODE ?= single
+ROWS ?= 100
 # reload-check needs the registry name; read it from cloud.env when not exported.
 MODEL_REGISTRY_NAME ?= $(shell grep -s '^MODEL_REGISTRY_NAME=' cloud.env | cut -d= -f2)
 
 .PHONY: help setup cloud-check data test portability-audit train image image-push reproduce verify clean teardown \
         tune compare register promote reload-check train-remote tune-remote seeds-remote serve serve-image loadtest drift inject-drift pipeline cost swap-check llm-eval llm-gate \
-        scan-secrets
+        scan-secrets deploy smoke
 
 help:
 	@grep -E "^[a-zA-Z_-]+:.*?## .*$$" $(MAKEFILE_LIST) | awk -F":.*?## " "{printf \"  %-20s %s\\n\", \$$1, \$$2}"
@@ -111,10 +114,18 @@ serve: ## Run the inference service locally on :8080
 serve-image: ## Build the serving image
 	docker buildx build --platform $(PLATFORM) -f service/Dockerfile.serve -t itcs355-serve:$(TAG) --load .
 
-loadtest: ## Load test at three concurrency levels
+deploy: serve-image ## Task 2: push the serving image and deploy VERSION to Container Apps
+	python scripts/deploy.py --version $(VERSION) --image itcs355-serve:$(TAG) --instance $(INSTANCE)
+
+smoke: ## Task 2: three known payloads against the deployed endpoint
+	ENDPOINT_URL=$$(cat reports/lab3-endpoint.txt) python scripts/deploy.py --smoke-only
+
+loadtest: ## Load test at three concurrency levels, keeping each summary as evidence
+	@mkdir -p reports/lab3
 	@for vus in 1 10 50; do \
 	  echo "=== $$vus VUs ==="; \
-	  k6 run -e TARGET=$(TARGET) -e VUS=$$vus loadtest/k6.js || true; \
+	  k6 run -e TARGET=$(TARGET) -e VUS=$$vus -e MODE=$(MODE) -e ROWS=$(ROWS) \
+	    --summary-export reports/lab3/k6-$(MODE)-$$vus.json loadtest/k6.js || true; \
 	done
 
 # --- Lab 4 -------------------------------------------------------------------
