@@ -13,6 +13,7 @@ import os
 import time
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
@@ -41,12 +42,30 @@ def _load_model():
         import mlflow.sklearn  # imported lazily so tests can run without a registry
 
         mlflow.set_tracking_uri(os.environ.get("MLFLOW_TRACKING_URI", "sqlite:///mlflow.db"))
-        return mlflow.sklearn.load_model(f"models:/{name}/{version}")
+        uri = f"models:/{name}/{version}"
+        try:
+            return mlflow.sklearn.load_model(uri)
+        except Exception as exc:
+            if "Untrusted types" not in str(exc):
+                raise
+            # The serialization risk this lab is about, met in practice. MLflow 3 stores
+            # scikit-learn models with skops, and skops refuses to rebuild
+            # sklearn.tree._tree.Tree unless the caller names it: the type holds raw node
+            # indices that scikit-learn reads without bounds checking, so a hostile file
+            # could crash the process. The list belongs in the MLmodel file, written at
+            # log time by log_model(skops_trusted_types=[...]) — this model was registered
+            # before that argument was added upstream, so the reader has to supply it.
+            # Trusting it here is a statement about provenance: this version's lineage tags
+            # name the commit, the data version and the training job that produced it.
+            import skops.io
+
+            local = mlflow.artifacts.download_artifacts(artifact_uri=uri)
+            model_file = next(Path(local).rglob("model.skops"))
+            log.warning('"loading %s with skops, trusting sklearn.tree._tree.Tree"', uri)
+            return skops.io.load(model_file, trusted=["sklearn.tree._tree.Tree"])
 
     # Fallback for local development and tests only. Submitting this is not acceptable:
     # your deployed service must load a registered version.
-    from pathlib import Path
-
     import joblib
 
     path = Path(os.environ.get("MODEL_PATH", "reports/model.joblib"))

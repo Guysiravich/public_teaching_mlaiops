@@ -1,0 +1,10 @@
+[14:38:57] round 1: removing the replica
+  first successful POST: 200 after 35.722100255 s
+  warm POST right after: 200 in 0.237167s
+[14:39:58] round 2: removing the replica
+  first successful POST: 200 after 35.451049870 s
+  warm POST right after: 200 in 0.217517s
+=== model load time from the container's own log ===
+2026-09-23T14:40:34.1777546Z stderr F INFO:     Started server process [1]
+2026-09-23T14:40:38.8772564Z stderr F {"ts":"2026-09-23 14:40:38,876","level":"INFO","msg":"model loaded, version=1"}
+2026-09-23T14:40:38.8774126Z stderr F INFO:     Application startup complete.

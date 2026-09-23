@@ -56,6 +56,20 @@ def _job_uri(uri: str) -> str:
     return f"wasbs://{container}@{account}{_BLOB_HOST_SUFFIX}/{path}"
 
 
+def _query(cmd: list[str]) -> str:
+    """Run a CLI query and return STDOUT only.
+
+    `_run` deliberately returns stdout and stderr together, which is right for `docker push`
+    (the digest is on stderr) and wrong for a lookup: the containerapp extension prints
+    "WARNING: The behavior of this command has been altered by the following extension"
+    on stderr, and an emptiness test on that sees a non-empty string and skips the create.
+    """
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"`{' '.join(cmd)}` failed ({result.returncode}):\n{result.stderr}")
+    return result.stdout.strip()
+
+
 def _run(cmd: list[str]) -> str:
     """Run a CLI command; raise with its output if it fails."""
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -295,15 +309,15 @@ class AzureAdapter(CloudAdapter):
         registry = self.cfg.container_registry.split("/")[0]
         tags = self.cfg.tags(3)
 
-        existing = _run(["az", "containerapp", "env", "list", "-g", group,
-                         "--query", f"[?name=='{_CONTAINER_APP_ENV}'].name", "-o", "tsv"]).strip()
+        existing = _query(["az", "containerapp", "env", "list", "-g", group,
+                           "--query", f"[?name=='{_CONTAINER_APP_ENV}'].name", "-o", "tsv"])
         if not existing:
             _run(["az", "containerapp", "env", "create", "-g", group, "-n", _CONTAINER_APP_ENV,
                   "-l", self.cfg.region, "--logs-destination", "none",
                   "--tags", *[f"{k}={v}" for k, v in tags.items()], "-o", "none"])
 
-        env_id = _run(["az", "containerapp", "env", "show", "-g", group, "-n", _CONTAINER_APP_ENV,
-                       "--query", "id", "-o", "tsv"]).strip()
+        env_id = _query(["az", "containerapp", "env", "show", "-g", group, "-n", _CONTAINER_APP_ENV,
+                         "--query", "id", "-o", "tsv"])
         spec = {
             "location": self.cfg.region,
             "tags": tags,
@@ -352,13 +366,13 @@ class AzureAdapter(CloudAdapter):
             json.dump(spec, handle)
             spec_path = handle.name
 
-        exists = _run(["az", "containerapp", "list", "-g", group,
-                       "--query", f"[?name=='{endpoint}'].name", "-o", "tsv"]).strip()
+        exists = _query(["az", "containerapp", "list", "-g", group,
+                         "--query", f"[?name=='{endpoint}'].name", "-o", "tsv"])
         verb = "update" if exists else "create"
         _run(["az", "containerapp", verb, "-g", group, "-n", endpoint, "--yaml", spec_path, "-o", "none"])
 
-        fqdn = _run(["az", "containerapp", "show", "-g", group, "-n", endpoint,
-                     "--query", "properties.configuration.ingress.fqdn", "-o", "tsv"]).strip()
+        fqdn = _query(["az", "containerapp", "show", "-g", group, "-n", endpoint,
+                       "--query", "properties.configuration.ingress.fqdn", "-o", "tsv"])
         return f"https://{fqdn}"
 
     def invoke(self, endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -388,7 +402,7 @@ class AzureAdapter(CloudAdapter):
         if "lab" not in tags or "course" not in tags:
             raise ValueError(f"teardown needs the course and lab tags; got {tags}")
         query = " && ".join(f"tags.{k} == '{v}'" for k, v in tags.items())
-        ids = _run([
+        ids = _query([
             "az", "resource", "list", "--query", f"[?{query}].id", "-o", "tsv",
         ]).split()
         if dry_run:

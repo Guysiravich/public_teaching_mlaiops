@@ -1,0 +1,66 @@
+[14:41:52] baseline revision: model version 1, 1 vCPU, one replica
+[14:43:17] baseline ready: {"status":"ready","model_version":"1"}
+[14:43:18] canary revision: model version 2 (the deliberately worse one)
+[14:43:33] traffic BEFORE the split
+[
+  {
+    "revisionName": "itcs355-predict--base1",
+    "weight": 100
+  }
+]
+[14:43:34] split 90/10
+[14:43:49] traffic AFTER the split
+[
+  {
+    "revisionName": "itcs355-predict--base1",
+    "weight": 90
+  },
+  {
+    "revisionName": "itcs355-predict--canary2",
+    "weight": 10
+  }
+]
+[14:43:51] monitor: 30 requests a second, alert at 3 sigma on the cumulative difference
+start 2026-09-23T14:43:58+00:00 endpoint=https://itcs355-predict.icywave-759b7394.eastasia.azurecontainerapps.io rate=30.0/s workers=8 rule: 3.0 sigma on the cumulative difference, min 200 responses per cohort
+  [  0.5 min] sent=861 errors=0 A: n=772 brier=0.0899 B: n=89 brier=0.1195
+  [  1.0 min] sent=1757 errors=0 A: n=1563 brier=0.0823 B: n=194 brier=0.0862
+  [  1.5 min] sent=2653 errors=0 A: n=2357 brier=0.0808 B: n=296 brier=0.0848 z=+0.41
+  [  2.0 min] sent=3551 errors=0 A: n=3152 brier=0.0813 B: n=399 brier=0.0859 z=+0.53
+  [  2.5 min] sent=4447 errors=0 A: n=3963 brier=0.0827 B: n=484 brier=0.0871 z=+0.57
+  [  3.0 min] sent=5343 errors=0 A: n=4771 brier=0.0811 B: n=572 brier=0.0830 z=+0.28
+  [  3.5 min] sent=6239 errors=0 A: n=5572 brier=0.0801 B: n=667 brier=0.0866 z=+0.98
+  [  4.0 min] sent=7134 errors=0 A: n=6394 brier=0.0808 B: n=740 brier=0.0884 z=+1.19
+  [  4.5 min] sent=8031 errors=0 A: n=7208 brier=0.0811 B: n=823 brier=0.0896 z=+1.39
+  [  5.0 min] sent=8926 errors=0 A: n=8020 brier=0.0809 B: n=906 brier=0.0868 z=+1.02
+  [  5.5 min] sent=9822 errors=0 A: n=8820 brier=0.0804 B: n=1002 brier=0.0880 z=+1.39
+  [  6.0 min] sent=10718 errors=0 A: n=9617 brier=0.0808 B: n=1101 brier=0.0918 z=+2.03
+  [  6.5 min] sent=11615 errors=0 A: n=10422 brier=0.0808 B: n=1193 brier=0.0928 z=+2.28
+  [  7.0 min] sent=12511 errors=0 A: n=11226 brier=0.0806 B: n=1285 brier=0.0910 z=+2.07
+  [  7.5 min] sent=13406 errors=0 A: n=12018 brier=0.0805 B: n=1388 brier=0.0900 z=+2.00
+  [  8.0 min] sent=14303 errors=0 A: n=12830 brier=0.0808 B: n=1473 brier=0.0913 z=+2.23
+  [  8.5 min] sent=15199 errors=0 A: n=13643 brier=0.0808 B: n=1556 brier=0.0927 z=+2.61
+  [  9.0 min] sent=16094 errors=0 A: n=14463 brier=0.0807 B: n=1631 brier=0.0913 z=+2.42
+  [  9.5 min] sent=16991 errors=0 A: n=15256 brier=0.0804 B: n=1735 brier=0.0909 z=+2.46
+  [ 10.0 min] sent=17887 errors=0 A: n=16073 brier=0.0810 B: n=1814 brier=0.0911 z=+2.44
+  [ 10.5 min] sent=18783 errors=0 A: n=16886 brier=0.0810 B: n=1897 brier=0.0909 z=+2.46
+  [ 11.0 min] sent=19679 errors=0 A: n=17696 brier=0.0809 B: n=1983 brier=0.0907 z=+2.48
+  [ 11.5 min] sent=20575 errors=0 A: n=18509 brier=0.0805 B: n=2066 brier=0.0920 z=+2.95
+  [ 12.0 min] sent=21470 errors=0 A: n=19315 brier=0.0809 B: n=2155 brier=0.0920 z=+2.90
+  [ 12.5 min] sent=22367 errors=0 A: n=20109 brier=0.0808 B: n=2258 brier=0.0923 z=+3.04
+  ALERT cohort B is worse by 3.0 sigma after 13.0 min (23262 responses)
+  [ 13.0 min] sent=23262 errors=0 A: n=20921 brier=0.0807 B: n=2341 brier=0.0918 z=+3.01
+
+cohort to model version (read only now, for the report):
+  cohort A = model_version 1: n=20925 mean Brier 0.0808
+  cohort B = model_version 2: n=2342 mean Brier 0.0918
+detection: cohort B flagged after 781 s (13.0 min), 3.0 sigma
+raw responses: reports/lab3/canary-raw.jsonl
+[14:57:00] ROLLBACK: all traffic back to the baseline revision
+[14:57:25] traffic AFTER the rollback
+[
+  {
+    "revisionName": "itcs355-predict--base1",
+    "weight": 100
+  }
+]
+[14:57:26] post-rollback check: x-model-version: 1

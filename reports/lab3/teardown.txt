@@ -1,0 +1,44 @@
+== what carries lab=3, before ==
+Name
+----------------
+itcs355-serve-id
+itcs355-env
+itcs355-predict
+itcs355-env-wp
+
+== make teardown LAB=3 DRY_RUN=1 ==
+teardown scope: {'course': 'itcs355', 'student': 'itcs355-6688067', 'lab': '3'}
+would delete /subscriptions/f2fad3f4-966f-4668-926e-b89f8f5e431e/resourceGroups/itcs355-6688067/providers/Microsoft.ManagedIdentity/userAssignedIdentities/itcs355-serve-id
+would delete /subscriptions/f2fad3f4-966f-4668-926e-b89f8f5e431e/resourceGroups/itcs355-6688067/providers/Microsoft.App/managedEnvironments/itcs355-env
+would delete /subscriptions/f2fad3f4-966f-4668-926e-b89f8f5e431e/resourceGroups/itcs355-6688067/providers/Microsoft.App/containerApps/itcs355-predict
+would delete /subscriptions/f2fad3f4-966f-4668-926e-b89f8f5e431e/resourceGroups/itcs355-6688067/providers/Microsoft.App/managedEnvironments/itcs355-env-wp
+Deletion is asynchronous: re-check the portal, and check the bill.
+
+== make teardown LAB=3 ==
+teardown scope: {'course': 'itcs355', 'student': 'itcs355-6688067', 'lab': '3'}
+deleted /subscriptions/f2fad3f4-966f-4668-926e-b89f8f5e431e/resourceGroups/itcs355-6688067/providers/Microsoft.ManagedIdentity/userAssignedIdentities/itcs355-serve-id
+deleted /subscriptions/f2fad3f4-966f-4668-926e-b89f8f5e431e/resourceGroups/itcs355-6688067/providers/Microsoft.App/managedEnvironments/itcs355-env
+deleted /subscriptions/f2fad3f4-966f-4668-926e-b89f8f5e431e/resourceGroups/itcs355-6688067/providers/Microsoft.App/containerApps/itcs355-predict
+deleted /subscriptions/f2fad3f4-966f-4668-926e-b89f8f5e431e/resourceGroups/itcs355-6688067/providers/Microsoft.App/managedEnvironments/itcs355-env-wp
+Deletion is asynchronous: re-check the portal, and check the bill.
+
+== what carries lab=3, after (expect nothing) ==
+
+
+== the rest of the resource group is untouched ==
+Name                                                      Lab
+--------------------------------------------------------  -----
+itcs3556688067                                            1
+itcs3556688067                                            1
+itcs3556logalyti4111698d                                  2
+itcs3556keyvault46c59a3a                                  2
+itcs3556insights3bcc7d3a                                  2
+itcs355-6688067-ml                                        2
+Application Insights Smart Detection
+itcs355-mlflowNSG                                         2
+itcs355-mlflowVNET                                        2
+itcs355-mlflowPublicIP                                    2
+itcs355-mlflowVMNic                                       2
+itcs355-mlflow                                            2
+itcs355-mlflow_OsDisk_1_e0bc527fbaf6432d97e5371273c64da3  2
+VM deallocated

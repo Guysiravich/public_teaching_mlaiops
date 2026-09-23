@@ -22,4 +22,8 @@ EXPOSE 8080
 # revision declares /health as its liveness probe and /ready as its readiness probe
 # (cloudlayer/azure.py, deploy). SageMaker would map /ping and /invocations the same way.
 # The routes in service/app.py are untouched, which is what keeps this image portable.
-CMD ["uvicorn", "service.app:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "2"]
+# One worker, not two. Each worker loads its own copy of the model and of scikit-learn,
+# and two of them do not fit the 1 GiB of a 0.5 vCPU Container Apps replica: the platform
+# killed the container with SIGTERM about a second after the second copy finished loading,
+# eight times in a row. Concurrency comes from replicas here, not from processes.
+CMD ["uvicorn", "service.app:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"]

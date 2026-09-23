@@ -514,3 +514,113 @@ scores decide where technicians are sent. Before promoting they should require:
 - [x] `reload_check.py` runs from the registry and scores rows — tested from a fresh clone
 - [x] Cost recorded per trial, total under 150 THB — 0.0296 THB of fitting; 9.8 THB billed for the whole lab
 - [ ] `make teardown` run — not run: `teardown()` is Lab 5 work in `base.py`. The cluster scales itself to zero, the tracking VM is deallocated after grading, and the registered model stays for Lab 3
+
+---
+
+# Lab 3 — Serving, load testing and rollback
+
+## What runs where
+
+| Piece | Where | Why |
+|---|---|---|
+| Inference service | one container image, FastAPI, `service/` | the same image runs locally and on the platform |
+| Endpoint | **Azure Container Apps**, consumption plan, `itcs355-predict` | `getting-started-azure.md`: an Azure ML managed online endpoint needs `ceil(1.2 × instances) × cores` of quota, so one `Standard_DS3_v2` asks for 8 vCPU against a student cap of about 3 that cannot be raised |
+| Model | loaded once at startup from the MLflow registry by version (`models:/itcs355-6688067/1`) | Lab 2's registry, unchanged |
+| Registry credentials | Container Apps **secrets**, referenced by the container as `secretref:` | better than Lab 2's job environment variables; Lab 4 moves them to Key Vault |
+| Image pull | user-assigned managed identity `itcs355-serve-id` with **`AcrPull` on the registry only** | no registry password anywhere |
+
+```bash
+make serve                        # run locally on :8080 with a file-backed model
+make serve-image                  # build the serving image
+make deploy VERSION=1             # push it and create/update the Container Apps revision
+make smoke                        # three known payloads against the live endpoint
+make loadtest TARGET=<url>/predict  # k6 at 1, 10 and 50 users, summaries into reports/lab3/
+make teardown LAB=3               # delete everything tagged lab=3
+```
+
+## Health and readiness are different questions
+
+`/health` answers "the process is up"; `/ready` answers "the model is loaded and can score".
+The Container Apps revision declares the first as its liveness probe and the second as its
+readiness probe, so a replica that is still loading the model is not sent traffic. This is not
+theoretical here: during the first deployment the model failed to load, `/health` returned 200
+for twenty minutes while `/ready` returned 503, and the ingress correctly served 404 rather
+than routing to a container that could not answer.
+
+## Three failures worth recording
+
+1. **The registered model would not load in the container.** `mlflow.sklearn.load_model`
+   raised `Untrusted types found in the file: ['sklearn.tree._tree.Tree']`. MLflow 3 stores
+   scikit-learn models with skops, and skops refuses to rebuild that type unless the caller
+   names it: it holds raw node indices that scikit-learn reads without bounds checking. The
+   list belongs in the MLmodel file, written at log time by `log_model(skops_trusted_types=…)`
+   — the argument the course repository added after this model was registered. `service/app.py`
+   therefore catches that one error, downloads the artifact by version and loads it with
+   `skops.io.load(trusted=["sklearn.tree._tree.Tree"])`, which is a statement about provenance:
+   the version's lineage names the commit, the data version and the training job that made it.
+   This is exactly the serialization risk the handout warns about, met in practice.
+2. **Two uvicorn workers do not fit 1 GiB.** The provided `Dockerfile.serve` starts two
+   workers; each loads its own copy of the model and of scikit-learn. On a 0.5 vCPU / 1 GiB
+   replica the platform killed the container with SIGTERM about a second after the second copy
+   finished loading, eight times in a row. The image now starts **one** worker and concurrency
+   comes from replicas.
+3. **The CLI's warning line broke a lookup.** `_run` in the adapter returns stdout and stderr
+   together, which is right for `docker push` (the digest is on stderr) and wrong for
+   `--query` lookups: the `containerapp` extension prints "WARNING: The behavior of this
+   command has been altered by the following extension" on stderr, so an emptiness test saw a
+   non-empty string and the adapter took the update branch for an app that did not exist.
+   Lookups now go through `_query`, which reads stdout only.
+
+Two platform constraints shaped the deployment as well. An **express** Container Apps
+environment refuses `activeRevisionsMode: Multiple` (`ExpressEnvironmentFeatureNotSupported`),
+which Task 4's canary needs, so the environment is created with `--environment-mode
+WorkloadProfiles`. And `az containerapp create --yaml` fails inside this preview extension
+with a 400 from the API, so the adapter creates the app with CLI flags and then patches the
+probes through the ARM API with a sanitised template — the read spec carries fields
+(`imageType`, `targetPortHttpScheme`) the write API rejects.
+
+## Load test, cold start, batch and cost
+
+Everything is in **[`reports/lab3-load.md`](reports/lab3-load.md)**, with the raw k6 summaries
+in `reports/lab3/`. The short version:
+
+- **Target, committed and pushed before the endpoint existed** (`5cb7e21`): p95 under 300 ms
+  at 10 concurrent users, errors under 1%, measured in-region on a warm instance.
+- **Breaking concurrency on 0.5 vCPU: five users** (p95 276.7 ms at four, 372.6 ms at five).
+- **The configuration that meets the target: 1 vCPU × 3 replicas** — p95 292.3 ms, p99 353.1 ms,
+  99.4 req/s, no errors.
+- **Cold start 35.5 s**, of which 4.7 s is loading the model; a warm request is 0.22 s.
+- **100 rows in one batch call take 19.0 ms**, against about 1,790 ms for 100 single calls.
+- **About 0.16 THB per 1,000 predictions** at a 20% utilisation assumption, stated explicitly.
+
+## Canary and rollback
+
+Model version 2 (val ROC-AUC 0.8261 against version 1's 0.8405) went out at 10% of traffic.
+The monitor scores every response against its known label and compares cohorts by the
+`x-model-version` header, without reading the traffic weights or which version is new. It
+alerted after **13.0 minutes** at 3 sigma; traffic went back to 100% baseline and the canary
+revision was deactivated. Timestamps, the traffic weights before and after, and every scored
+response are in `reports/lab3/`.
+
+## Notes for the grader — Lab 3
+
+- **The endpoint is deleted.** `make teardown LAB=3` removes everything tagged `lab=3`: the
+  container app, its environment and the serving identity. The Lab 2 registry, storage account
+  and container registry carry other lab tags and are untouched, because Lab 3's own handout
+  says the registered model stays for later labs. Output of the teardown run is in
+  `reports/lab3/teardown.txt`.
+- **`make teardown` as provided would have deleted Lab 1.** The target called
+  `teardown(cfg.tags(1))` — lab 1 hardcoded — so running it during Lab 3, as this handout asks,
+  would have removed the storage account and the container registry. It now requires an
+  explicit `LAB=` and refuses without one; `scripts/teardown.py` and the adapter's `teardown()`
+  delete by tag, never by resource group. Writing it in Lab 3 rather than Lab 5 is a deviation
+  from `base.py`, forced by this handout's checklist.
+- **`make deploy` and `make smoke` did not exist** in the provided Makefile; both are added,
+  along with `INSTANCE` (`<cpu>/<memory>`) for the instance-size experiment.
+- **Load generated from inside the region.** k6 runs on the tracking-server VM in `eastasia`
+  through the Azure agent, because the NSG admits SSH only from the address the VM was created
+  from and that address had changed. A laptop in Bangkok adds 40–60 ms to every measurement.
+- **Model loading through the adapter.** The handout asks for the model to arrive through the
+  adapter; the provided `service/app.py` loads it from the MLflow registry directly, and that
+  code is kept. MLflow is the portable seam here — no provider name appears in `service/`, and
+  `make portability-audit` passes.
