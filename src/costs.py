@@ -26,7 +26,17 @@ PRICE_TABLE: dict[str, dict[str, float]] = {
     #   Standard_F4s_v2       0.2160 USD/h  was 6.9 THB/h
     #   Standard_NC4as_T4_v3  not offered in eastasia; removed (was 24.5 THB/h)
     "azure": {
-        "Standard_DS2_v2": 7.11,
+        # Azure for Students caps regional vCPU at 3-4 and QUOTA INCREASES ARE REFUSED.
+        # Prices verified for eastasia with the Retail Prices API on 2026-09-18,
+        # USD list price x 33.234 THB/USD (see README, "Compute and cost").
+        "Standard_B1s": 0.49,             # 1 vCPU, 1 GiB  — not offered in eastasia; kept for reference
+        "Standard_B2ats_v2": 0.44,        # 2 vCPU, 1 GiB  — the tracking-server VM in eastasia
+        "Standard_DS2_v2": 7.11,          # 2 vCPU, 7 GiB  — the Lab 2 training cluster
+        # The two below are 4 vCPU each and DO NOT FIT a student subscription. An Azure ML
+        # managed online endpoint needs ceil(1.2 x instances) x cores, so one Standard_DS3_v2
+        # instance asks for 8 vCPU against a cap of about 3. Left here because they are the
+        # right answer on Pay-As-You-Go, and Lab 5 compares what you can run against what you
+        # would choose. Standard_NC4as_T4_v3 is not offered in eastasia at all.
         "Standard_DS3_v2": 14.22,
         "Standard_F4s_v2": 7.18,
     },

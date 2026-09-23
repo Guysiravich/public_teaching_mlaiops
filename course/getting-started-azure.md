@@ -27,11 +27,41 @@ from your university email and issues credit valid for twelve months. If you hav
 you would rather not put a personal card behind a course exercise, this is the path with the
 fewest obstacles.
 
-The catch is honest and worth knowing before you commit: **Azure Container Registry bills a flat
-daily rate** — roughly USD 0.17 a day on the Basic tier — whether you push anything or not. GCP's
-Artifact Registry charges for what you store instead. Over a term the difference is real but
-comfortably inside your student credit, provided you **delete the registry when the course ends**.
-On Azure, teardown is not a formality.
+Two catches, and the second is the one that shapes how you do Labs 3 and 5.
+
+**Azure Container Registry bills a flat daily rate** — roughly USD 0.17 a day on the Basic tier —
+whether you push anything or not. GCP's Artifact Registry charges for what you store instead. Over
+a term the difference is real but comfortably inside your student credit, provided you **delete the
+registry when the course ends**. On Azure, teardown is not a formality.
+
+## The vCPU ceiling — read this before Lab 3
+
+**Azure for Students caps you at about 3 vCPU per region, and the cap cannot be raised.**
+
+Free subscriptions are not eligible for quota increases. The request is refused by design, and the
+only way past it is converting to Pay-As-You-Go, which means attaching a credit card — the exact
+thing this path exists to avoid. Some student subscriptions show quota **0** for certain families,
+D-series especially.
+
+Two consequences you need to plan around:
+
+| | |
+|---|---|
+| **VM sizes** | Use **B-series burstable**: `Standard_B1s` (1 vCPU) or `Standard_B2s` (2 vCPU). A 4-vCPU size such as `Standard_DS3_v2` will not deploy. |
+| **Azure ML managed online endpoints** | Effectively unavailable. They reserve 20% for upgrades, so the quota needed is `ceil(1.2 x instances) x cores` — one `Standard_DS3_v2` instance asks for **8 vCPU** against a cap of 3. Even a 2-core size asks for 4. |
+
+**So Lab 3 does not deploy to an Azure ML managed endpoint.** Deploy your container to **Azure
+Container Apps** instead: consumption pricing, scales to zero, no Azure ML core quota involved, and
+a monthly free grant that covers this course comfortably. The lab asks for a deployed inference
+endpoint — it does not require it to be an Azure ML one.
+
+```bash
+az containerapp up --name itcs355-predict --resource-group $RG \
+  --image $ACR.azurecr.io/itcs355/serve:<sha> --target-port 8080 --ingress external
+```
+
+This is not a workaround to be embarrassed about. Choosing the service that fits your constraints,
+and being able to say what the constraint was, is the whole subject.
 
 ---
 

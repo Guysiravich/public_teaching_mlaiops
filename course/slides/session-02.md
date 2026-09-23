@@ -56,6 +56,14 @@ What we will look at:
 
 - The `exec format error` — built on arm64, run on amd64
 - A tolerance of ±0.1 on a metric of 0.85
+
+<!--
+The ±0.1 slide is the one to spend time on. Ask the room what the tolerance is measuring
+before you say it. `make reproduce` pins the seed, so the honest number is what a second
+machine does with the same seed — nothing, here, to the last digit. The ±0.05-ish answers
+are the seed spread (0.8229-0.8729 over seeds 1-5), which measures the split, not the build.
+Both numbers matter; only one of them goes on the claim line. This is Drill 1 territory.
+-->
 - A `make reproduce` that needed an undocumented environment variable
 - Something that worked here and nowhere else
 

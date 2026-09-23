@@ -44,8 +44,9 @@ def main() -> int:
         print("\nPASS  reproduced within tolerance")
         return 0
     print("\nFAIL  outside tolerance.\n"
-          "      Either your run is not deterministic, or the claim is stale.\n"
-          "      Widening the tolerance to hide non-determinism is visible to the grader.")
+          "      `make reproduce` pins the seed, so this is not seed variance. Either the\n"
+          "      claim is stale, or something in your environment moved under the pins.\n"
+          "      Widening the tolerance to cover it is visible to the grader.")
     return 1
 
 

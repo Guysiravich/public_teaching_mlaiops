@@ -488,13 +488,11 @@ scores decide where technicians are sent. Before promoting they should require:
   `make tune-remote`, `make seeds-remote`, `make register` and `make promote` are added for the
   study, the seed runs and Task 4. `make cost-report` does not exist; spend is taken from Azure Cost
   Management.
-- **Lab 1's "no credentials in history" check now matches variable names, not secrets.** Its
-  pattern (the word password, an equals sign, any character) matches five lines added for Lab 2:
-  shell variables in `infra/tracking-server/make_secrets.sh` that hold values generated at run time
-  by `rand`, and a commented placeholder in `cloud.env.example` (commits `1420405` and `5ebab3c`).
-  No credential is in the history; the real password was searched for and appears 0 times. The
-  commits are not rewritten, because rewriting them would change `4bb88f9`, the commit the
-  registered model's `git_commit` lineage points at. The Lab 2 check passes.
+- **Credential scan.** `python scripts/scan_secrets.py`, which replaced the old word-matching grep
+  upstream, reports `CLEAN` on this repository's whole history. The tracking server's password was
+  searched for explicitly and appears 0 times. Shell variable names such as `POSTGRES_PASSWORD` in
+  `infra/tracking-server/make_secrets.sh` hold values generated at run time by `rand`; the old grep
+  matched those names, the new scanner matches the shape of a value and does not.
 - **`make reload-check` needed `MODEL_REGISTRY_NAME` exported in the shell.** It now falls back to
   `cloud.env`.
 - **Teardown.** `make teardown` calls the adapter's `teardown()`, which `base.py` schedules for Lab 5

@@ -15,7 +15,6 @@ service/      Layer 1            inference service
 monitoring/   Layer 1            drift, SLOs, dashboard
 cloudlayer/   Layer 3            the only place a provider SDK may be imported
 pipeline/                        the neutral DAG for Lab 5
-instructor/                      grading scripts and marking notes — DELETE before distributing
 ```
 
 ---
@@ -146,22 +145,28 @@ working, which is why the default here is `sqlite:///mlflow.db`. If you see a ma
 mode exception, this is why.
 
 **A fixed seed reproduces; a changed seed does not.** At seed 20260101 the reference run
-returns `test_roc_auc` 0.8482 every time, on any machine. Sweeping seeds 1–5 moves it across
-0.82–0.87, because the seed moves the *split*, not just the model. Your stated tolerance
-covers the first kind of variation, never the second — and padding it to hide the difference
-is visible to the grader.
+returns `test_roc_auc` 0.8482510866616827 — the same digits run after run and on 1, 4 or 8
+threads, and 0.8482378548603715 on the amd64 CI runner, a gap of 1.3e-5 across every
+environment axis at once. Sweeping seeds 1–5 moves it across 0.8229–0.8729, because the seed
+moves the *split*, not just the model. Your stated tolerance covers the first kind of variation, never the second
+— and padding it to hide the difference is visible to the grader.
 
 ---
 
-## Instructor material
+## Instructor material is not in this repository
 
-`instructor/` holds the teaching guide, grading scripts, and marking notes. **Remove it
-before distributing the repository to students** — `RUBRIC-labs-2-to-5.md` tells them
-exactly which judgement items carry the marks.
+Teaching guide, marking rubrics, grading scripts, drill answers, and the Session 1
+cold-open answer key live in a separate private repository. They are not here, and
+`.gitignore` carries `instructor/` so they cannot drift back in by accident.
 
-```bash
-git rm -r --cached instructor/ && echo "instructor/" >> .gitignore
-```
+This guide used to say "remove it before distributing the repository to students" and
+give the `git rm --cached` command. That advice was being followed by nobody, including
+us: the directory sat on this repository's public main branch from 4 September to 23
+September 2026. A public repository has already distributed everything in it, so the
+instruction was describing a step that could no longer be taken.
+
+If you are teaching from this material, make your own private repository for the
+answer keys before you write any. Removing them later does not unpublish them.
 
 `course/spec/Course_Specification_ITCS355_merged.xlsx` contains a **Merge Notes** sheet
 listing open decisions and every change made to the faculty template. Delete that sheet

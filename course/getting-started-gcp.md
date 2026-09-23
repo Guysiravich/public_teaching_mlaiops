@@ -268,9 +268,11 @@ make verify      # compare the produced metric against the claim in README.md
 
 `make verify` parses the line `expected test_roc_auc: <value> ± <tolerance>` out of the root
 `README.md` and compares it against what you just produced. You must re-measure and update that
-line after your final change. Choose the tolerance from the spread you actually observe across
-seeds — padding it to hide non-determinism is visible, because the grader compares your tolerance
-against the variance in your own tracked runs.
+line after your final change. The tolerance is how far the *same* seed moves on a *different*
+machine — `make reproduce` pins the seed, so that is the only thing the grader's run can differ
+by, and measured across two architectures it is about 1e-5. It is not the spread across seeds,
+which measures the split and is nearly four thousand times larger. The block beside the claim
+line in `README.md` works through the difference; read it before you pick a number.
 
 **If you are stuck on GCP access, do this part anyway.** It is most of the lab, and it is the
 half that is graded by a script.

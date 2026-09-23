@@ -27,3 +27,7 @@ __pycache__/
 # Tracking server secrets (Lab 2). Never commit.
 infra/tracking-server/.env
 infra/tracking-server/auth.caddy
+
+# Instructor material lives in the private teaching repository. If this path ever
+# reappears here it is a mistake, not a convenience.
+instructor/

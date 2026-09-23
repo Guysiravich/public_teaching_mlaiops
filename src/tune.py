@@ -126,7 +126,16 @@ def main() -> None:
                 "image_digest": os.environ.get("IMAGE_DIGEST", "local"),
                 "lab": "2",
             })
-            mlflow.sklearn.log_model(model, name="model")
+            # skops 0.15 refuses to serialise sklearn tree models unless the caller names
+            # the types it trusts. sklearn.tree._tree.Tree stores raw node indices that
+            # scikit-learn indexes without bounds checking, so a malicious file can segfault
+            # the process on .predict(). We built this model in this process from our own
+            # data, so trusting it here is a statement about provenance, not a bypass — and
+            # it is scoped to the one type rather than everything skops reports.
+            mlflow.sklearn.log_model(
+                model, name="model",
+                skops_trusted_types=["sklearn.tree._tree.Tree"],
+            )
 
         state["completed"].append(key)
         save_checkpoint(args.checkpoint, state)
