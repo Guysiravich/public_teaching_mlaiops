@@ -247,6 +247,26 @@ class AzureAdapter(CloudAdapter):
                 }
             time.sleep(_POLL_SECONDS)
 
+    # --- Lab 3 ---------------------------------------------------------------
+    def teardown(self, tags: dict[str, str], dry_run: bool = False) -> list[str]:
+        """Delete every resource carrying ALL of these tags. Returns what was deleted.
+
+        Scoped by tag, never by resource group: Labs 1, 2 and 3 share one group, and the
+        group also holds the tracking server Lab 3 still needs. A missing "lab" tag is
+        refused rather than widened, because the widening is what deletes Lab 1.
+        """
+        if "lab" not in tags or "course" not in tags:
+            raise ValueError(f"teardown needs the course and lab tags; got {tags}")
+        query = " && ".join(f"tags.{k} == '{v}'" for k, v in tags.items())
+        ids = _run([
+            "az", "resource", "list", "--query", f"[?{query}].id", "-o", "tsv",
+        ]).split()
+        if dry_run:
+            return ids
+        for resource_id in ids:
+            _run(["az", "resource", "delete", "--ids", resource_id, "--verbose"])
+        return ids
+
     def register_model(self, model_uri: str, name: str) -> str:
         """Register a tracked run's model and put its lineage ON THE VERSION.
 

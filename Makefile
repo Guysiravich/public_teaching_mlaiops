@@ -66,9 +66,10 @@ verify: ## Check the produced metric against the README claim
 scan-secrets: ## Scan Git history for credential-shaped values
 	python scripts/scan_secrets.py
 
-teardown: ## Delete every resource tagged course=itcs355 for this lab
-	python -c "from src import config; from cloudlayer.factory import get_adapter; \
-	cfg=config.load(); print(get_adapter(cfg).teardown(cfg.tags(1)))"
+teardown: ## Delete every resource tagged course=itcs355 lab=$(LAB): make teardown LAB=3
+	@test -n "$(LAB)" || { echo "refusing to run without LAB=<n>: as provided this target"; \
+	  echo "deleted lab=1 whatever lab you were on, which is Lab 1's storage and registry."; exit 1; }
+	python scripts/teardown.py --lab $(LAB) $(if $(DRY_RUN),--dry-run,)
 
 clean: ## Remove local artifacts
 	rm -rf mlruns mlartifacts mlflow.db reports/metrics.json .pytest_cache
