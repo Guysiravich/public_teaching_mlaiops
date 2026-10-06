@@ -3,7 +3,11 @@
 # Runs only on main, only after CI is green. Credentials come from OIDC federation, not
 # from stored keys: azure/login exchanges this run's GitHub token for an Azure token as the
 # user-assigned identity itcs355-gha-id, whose federated credential trusts only
-# repo:Guysiravich/public_teaching_mlaiops:environment:staging. No client secret exists.
+#   repo:Guysiravich@52388254/public_teaching_mlaiops@1367593417:environment:staging
+# GitHub's subject carries the owner and repository IDs, not only their names: a credential
+# written as repo:Guysiravich/public_teaching_mlaiops:... is refused (AADSTS700213, first
+# CD run). The IDs are what stop a deleted-and-recreated repository of the same name from
+# inheriting the trust. No client secret exists.
 
 name: CD
 
