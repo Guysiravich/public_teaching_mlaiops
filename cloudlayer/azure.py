@@ -361,14 +361,20 @@ class AzureAdapter(CloudAdapter):
             if workspace:
                 customer_id = _query(["az", "monitor", "log-analytics", "workspace", "show",
                                       "--ids", workspace, "--query", "customerId", "-o", "tsv"])
+                # get-shared-keys, unlike show, does not accept --ids.
+                ws_group, ws_name = workspace.split("/")[4], workspace.rstrip("/").split("/")[-1]
                 key = _query(["az", "monitor", "log-analytics", "workspace", "get-shared-keys",
-                              "--ids", workspace, "--query", "primarySharedKey", "-o", "tsv"])
+                              "-g", ws_group, "-n", ws_name,
+                              "--query", "primarySharedKey", "-o", "tsv"])
                 logs = ["--logs-destination", "log-analytics",
                         "--logs-workspace-id", customer_id, "--logs-workspace-key", key]
             else:
                 logs = ["--logs-destination", "none"]
+            # Workload profiles, not the CLI's default express environment: express refuses
+            # Multiple revision mode (Lab 3) and a revision suffix (Lab 4). Apps still run on
+            # the Consumption profile, billed per second like before, inside the free grant.
             _run(["az", "containerapp", "env", "create", "-g", group, "-n", environment,
-                  "-l", self.cfg.region, *logs,
+                  "-l", self.cfg.region, "--environment-mode", "WorkloadProfiles", *logs,
                   "--tags", *[f"{k}={v}" for k, v in tags.items()], "-o", "none"])
 
         env_id = _query(["az", "containerapp", "env", "show", "-g", group, "-n", environment,
@@ -423,10 +429,25 @@ class AzureAdapter(CloudAdapter):
             json.dump(spec, handle)
             spec_path = handle.name
 
-        exists = _query(["az", "containerapp", "list", "-g", group,
-                         "--query", f"[?name=='{endpoint}'].name", "-o", "tsv"])
-        verb = "update" if exists else "create"
-        _run(["az", "containerapp", verb, "-g", group, "-n", endpoint, "--yaml", spec_path, "-o", "none"])
+        # The spec is already an ARM body, so it goes to ARM directly. `az containerapp
+        # create --yaml` with the same content fails with a 400 ("could not be converted to
+        # System.Boolean") — met in Lab 3 and again on the first Lab 4 CD run. A PUT creates
+        # the app or replaces its configuration, which makes a new revision either way.
+        subscription = env_id.split("/")[2]
+        url = (f"https://management.azure.com/subscriptions/{subscription}/resourceGroups/{group}"
+               f"/providers/Microsoft.App/containerApps/{endpoint}?api-version=2024-03-01")
+        _run(["az", "rest", "--method", "put", "--url", url, "--body", f"@{spec_path}", "-o", "none"])
+
+        import time
+        deadline = time.time() + 900
+        while True:  # the PUT returns at once; provisioning finishes in the background
+            state = _query(["az", "containerapp", "show", "-g", group, "-n", endpoint,
+                            "--query", "properties.provisioningState", "-o", "tsv"])
+            if state == "Succeeded":
+                break
+            if state == "Failed" or time.time() > deadline:
+                raise RuntimeError(f"container app {endpoint} provisioning ended as {state}")
+            time.sleep(10)
 
         fqdn = _query(["az", "containerapp", "show", "-g", group, "-n", endpoint,
                        "--query", "properties.configuration.ingress.fqdn", "-o", "tsv"])
