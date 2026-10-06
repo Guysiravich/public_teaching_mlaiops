@@ -53,6 +53,7 @@ def main() -> int:
         "env": {k: os.environ[k] for k in PASSED_THROUGH} | {"CLOUD_PROVIDER": cfg.provider,
                                                              "REGION": cfg.region},
         "lab": 4,
+        "output": False,   # nothing to keep, and a scheduled pipeline step rejects it
     }
     if args.once:
         job_id = adapter.submit_training(image_ref, job)

@@ -624,3 +624,173 @@ response are in `reports/lab3/`.
   adapter; the provided `service/app.py` loads it from the MLflow registry directly, and that
   code is kept. MLflow is the portable seam here — no provider name appears in `service/`, and
   `make portability-audit` passes.
+
+---
+
+# Lab 4 — CI/CD, observability and drift
+
+## What runs where
+
+| Piece | Where | Why |
+|---|---|---|
+| CI | GitHub Actions, `.github/workflows/ci.yml`, on every pull request and push to main | the handout's order: secret scan → lint → unit → data contract → behaviour → build → integration |
+| CD | `.github/workflows/cd.yml`, after a green CI run of a **push to main** only | a pull request's CI run never deploys |
+| CD identity | user-assigned identity `itcs355-gha-id`, **OIDC federated credential**, Contributor on the resource group | no client secret or stored key exists anywhere |
+| Staging endpoint | Container App `itcs355-staging`, 0.5 vCPU, scale 0–1, Single revision mode, revision suffix = commit | scales to zero when unused, so staging costs nothing between deploys |
+| Served model | the version the registry alias **`staging`** (set in Lab 2) points to, resolved once by CD and deployed as a number | the alias says what is approved; the revision must say what is running, and keep saying it after a restart |
+| Dashboard | Prometheus + Grafana in Docker on the laptop, scraping `/metrics`; `monitoring/dashboard.json` is the dashboard | dashboard as code, provisioned on start |
+| Drift detector | `monitoring/drift_job.py` on an **Azure ML schedule**, every 15 minutes, on the scale-to-zero `ded-ds2` cluster | the handout names Azure ML schedules for Azure |
+| Production inputs | the service logs one line per scored row; the Container Apps environment ships stdout to Log Analytics `itcs355-logs-l4`; the job reads the last 500 back | the service stays provider-neutral; the platform does the collecting |
+| Alert | the job writes `drift_threshold_ratio` to Azure Monitor custom metrics; metric alert `itcs355-drift-alert` → action group → **email** to the student address | a real channel; Line Notify no longer exists |
+
+```bash
+make test                                   # unit, data contract, behaviour, service
+make threshold-study                        # reports/lab4/threshold-study.md
+make inject-drift && make drift             # the local version of Task 6
+make monitor ENDPOINT=$(cat reports/lab4-staging-endpoint.txt)   # Grafana on http://localhost:3000
+make drift-schedule / make drift-unschedule # the Azure ML schedule
+python scripts/send_traffic.py --rows 100 --repeat 90 --switch-to data/current.csv --switch-after 30
+make teardown LAB=4                         # resources tagged lab=4, and the schedule by name
+```
+
+## Tests, and the incident each data contract test would have caught (Task 1)
+
+| Category | Where | Fails when |
+|---|---|---|
+| Unit | `tests/test_drift.py` (PSI and KS arithmetic), `tests/test_service.py` (validation, batch = singles, metrics split 4xx/5xx, rolling statistic) | our code changes |
+| Data contract | `tests/test_data.py` | the producer of the data changes |
+| Model behaviour | `tests/test_model_behaviour.py` (healthy machine scores low, risk rises with wear, not constant, latency under the 300 ms target) | the model changes |
+| Integration | `ci.yml` build job: build the serving image, start it, `POST /predict`, assert the response shape **and that `model_version` is the commit SHA** | the image does not serve what was built |
+
+| Data contract test | The production incident it would have caught |
+|---|---|
+| `test_schema_columns_present_and_typed` | The sensor gateway renames `ambient_humidity` to `humidity` in an update, or starts writing `reading_id` as text. Without the test, `pd.DataFrame(rows)[FEATURES]` fails at serving time, or a type silently changes under the model. |
+| `test_no_nulls_in_required_columns` | A gateway outage writes empty fields for an afternoon; the rows reach training as NaN and scikit-learn either refuses them in the scheduled retrain or, after someone adds an imputer, learns from invented values. |
+| `test_features_within_plausible_ranges` | **Task 3's bad commit:** a firmware update makes a batch of sensors report Fahrenheit under the name `temp_c` (231 °C). Same for pressure arriving in psi instead of kPa. The model would score impossible machines with full confidence. |
+| `test_target_is_binary_and_not_degenerate` | The join to the maintenance log breaks and every label comes through as 0. A model trained on it reaches 100% accuracy by never predicting a failure. |
+| `test_identifier_is_unique` | An export job re-runs and appends instead of replacing, so every reading appears twice and duplicates can land on both sides of a split. |
+| `test_no_machine_leaks_across_splits` | Someone "simplifies" the split to random rows: readings of one machine appear in training and test, and the validation score stops predicting production (the Lab 1 leakage test, still in CI). |
+
+## The blocked bad commit (Task 3)
+
+Branch `lab4-bad-contract` changes the data producer, `scripts/make_dataset.py`: machines 200 and
+up report temp_c in Fahrenheit. CI on that pull request fails in the **Data contract tests** step:
+
+```
+FAILED tests/test_data.py::test_features_within_plausible_ranges - AssertionError: temp_c above plausible ceiling: 231.396
+```
+
+The unit tests in the step before it pass, so the contract test is the one that stops it. Nothing
+was built, pushed or deployed, and the pull request was closed without merging.
+Evidence: PR_LINK_PLACEHOLDER
+
+## Dashboard and SLO (Task 4)
+
+`monitoring/dashboard.json` is a real Grafana dashboard, provisioned by `monitoring/compose.yaml`:
+request rate; error rate split into 4xx and 5xx; p50/p95/p99 of `/predict` with the 300 ms target
+drawn on it; **temp_c rolling mean and standard deviation over the last 500 inputs** (the
+feature-distribution statistic — mean for a shift, standard deviation for a change of scale); the
+model version in production; and the number of rows in the rolling window. All of it comes from
+`/metrics` on the service (`prometheus-client`, added to both hash-locked requirement files).
+
+The SLOs are in `monitoring/slo.yaml`, one sentence each for target, window and the response when
+the budget is spent: **availability 99.5% over 30 days** (deploy freeze except rollbacks and the
+fix), **p95 under 300 ms over 7 days** (a ticket for capacity, not a page — a 7-day maintenance
+decision tolerates seconds), **model age under 35 days** (page the model owner; never retrain by
+hand on unchecked data). The reasoning for each number is in the file.
+
+## Drift threshold, and why (Task 5)
+
+`reports/lab4/threshold-study.md` measures the two numbers a threshold has to sit between, against
+the training reference, with windows of the held-out machines:
+
+- **Noise.** With no drift at all, five features stay under PSI 0.057 at p99 in a 500-row window.
+  **load_pct does not**: it differs between machines by design, so the held-out pool already scores
+  0.134 against training and drift-free windows reach 0.213 at p99 (0.252 at worst).
+- **Harm.** A temp_c offset of +3 °C gives PSI 0.116, +4 °C gives 0.185, +6 °C 0.41.
+
+So the thresholds are **0.10 for five features and 0.30 for load_pct**, over the **last 500
+inputs**. The library default of 0.25 would have missed a +4 °C sensor offset and would still
+have fired on load_pct's normal machine-to-machine variation; a single 0.10 would fire on load_pct
+on every run. A window shorter than 500 rows charts sampling noise as drift (p99 of 0.10 at 200
+rows), so the job skips scoring and reports the shortfall when it has fewer.
+
+Which statistic caught which fault, run locally on all three `inject_drift` modes:
+
+| Mode | temp_c PSI | KS | Caught at 0.10 |
+|---|---|---|---|
+| `shift` +6 | 0.383 | 0.246 | yes |
+| `scale` ×1.5 (mean unchanged at 79.58) | 0.206 | 0.114 | yes — PSI sees shape, the mean does not move at all |
+| `mix` (reweighted machines) | 0.009 | 0.034 | **no** — the realistic one stays under every threshold |
+
+## Injected drift (Task 6)
+
+| Time (UTC, 6 Oct) | Event |
+|---|---|
+| 13:35 | normal traffic, 100 held-out rows every 30 s |
+| 13:50 | scheduled run on normal inputs: ratio **0.57** (temp_c PSI 0.057) — no alert |
+| **13:50:23** | **injection**: inputs switch to `data/current.csv`, temp_c +6 °C |
+| 14:00 | scheduled run "completed" in **zero seconds** — Azure ML reused the cached result |
+| 14:20 | 14:15 run (after the fix): temp_c PSI **0.3505**, ratio **3.505** |
+| **14:22:39** | **alert fired**, email sent |
+
+**Detection time: 32 min 16 s**, of which one 15-minute cycle was lost to the cached run; without
+it the 14:00 run would have alerted at about 14:07. The dashboard shows the rolling mean moving from
+79.6 to 85.5 °C within three minutes of the injection with the standard deviation flat
+(`reports/lab4/dashboard-shift.png`). Post-mortem: **[`reports/lab4-postmortem.md`](reports/lab4-postmortem.md)**
+— the decision is neither retrain nor roll back, because the cause is a broken sensor, not a
+changed world.
+
+## Failures worth recording
+
+1. **GitHub's OIDC subject carries IDs.** The federated credential written as
+   `repo:Guysiravich/public_teaching_mlaiops:environment:staging` was refused (`AADSTS700213`); the
+   token says `repo:Guysiravich@52388254/public_teaching_mlaiops@1367593417:environment:staging`.
+   The IDs stop a deleted-and-recreated repository of the same name inheriting the trust.
+2. **`deploy()` failed three ways on its first CD run**: `get-shared-keys` does not take `--ids`;
+   `containerapp create --yaml` still returns the Lab 3 400, so the ARM body now goes to ARM with
+   `az rest --method put`; and the CLI's default express environment refuses a revision suffix, so
+   the environment is created with `--environment-mode WorkloadProfiles` (the Lab 3 README's
+   description of "CLI flags and an ARM patch" is superseded by the PUT).
+3. **An Azure ML schedule will not take a command job** ("Unsupported job type 'CommandJob'"), so
+   the job runs as the single step of a pipeline — which then rejected the `wasbs://` output folder
+   ("DataStore name is missing"; the drift job has no output, so it has none now) and then
+   **reused the cached result** of an identical step, so a run "completed" without reading the new
+   inputs. `force_rerun` fixes it. A detector that silently stops detecting is the failure the
+   post-mortem's heartbeat alert is for.
+
+## Notes for the grader — Lab 4
+
+- **Deviations from the provided files, each deliberate:**
+  - `monitoring/dashboard.json` is now an importable Grafana dashboard. The provided error-rate
+    query returns nothing: the numerator has a `status_class` label the denominator lacks, so
+    the division needs `ignoring(status_class) group_left`.
+  - `cloudlayer/base.py` gains two methods beyond the eleven, `recent_inputs()` and
+    `schedule()`. Reading the platform's logs and creating a schedule are provider calls, and
+    provider calls belong in `cloudlayer/`.
+  - CD rebuilds the serving image from the commit CI tested instead of carrying CI's image
+    across. The provided `cd.yml` runs on another runner, where CI's image does not exist. The
+    base image is pinned by digest and every package by hash.
+  - `azure-identity` is added to `requirements.txt`. The drift job authenticates as the
+    cluster's managed identity, as the adapter docstring suggests.
+- **Secrets.** GitHub holds `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` and `AZURE_SUBSCRIPTION_ID`
+  (identifiers), and `STAGING_ENV`. `STAGING_ENV` carries the cloud.env lines CD needs,
+  including the tracking server's password. Nothing secret is committed, and
+  `make scan-secrets` is clean on the full history.
+- **The schedule is deleted by name.** Azure ML schedules carry no resource tags, so
+  `make teardown LAB=4` deletes `itcs355-drift` explicitly and then lists what is left.
+
+## Checklist before you submit — Lab 4
+
+- [x] Unit tests, 2+ data contract tests, 1+ model behaviour test, 1 integration test
+- [x] README naming the incident each data contract test would have caught — above
+- [x] CI pipeline running the full sequence, secrets via OIDC and the repository secret store
+- [x] Images tagged by commit SHA (CI builds `itcs355-serve:${{ github.sha }}`; staging runs `--g<sha>` revisions)
+- [x] CD to staging on green, main only
+- [x] Evidence of the blocked bad commit — failing run and the test that caught it
+- [x] Dashboard with the five required signals
+- [x] SLO: target, window, and error-budget response
+- [x] Scheduled drift detector with a justified threshold, alerting to a real channel
+- [x] Injected drift: alert evidence, timestamps, detection time
+- [x] Five-line post-mortem
+- [ ] `make teardown` run — TEARDOWN_PLACEHOLDER

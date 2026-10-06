@@ -264,8 +264,12 @@ class AzureAdapter(CloudAdapter):
             compute=compute,
             inputs={"data": Input(type=AssetTypes.URI_FOLDER, path=_job_uri(data_uri),
                                   mode=InputOutputModes.RO_MOUNT)},
-            outputs={"output": Output(type=AssetTypes.URI_FOLDER, path=_job_uri(output_uri),
-                                      mode=InputOutputModes.RW_MOUNT)},
+            # args["output"]=False drops the output folder: a pipeline step (which is how a
+            # schedule runs this) rejects a wasbs:// output with "DataStore name is missing",
+            # and the drift job writes nothing worth keeping there anyway.
+            outputs=({"output": Output(type=AssetTypes.URI_FOLDER, path=_job_uri(output_uri),
+                                       mode=InputOutputModes.RW_MOUNT)}
+                     if args.get("output", True) else {}),
             environment_variables=env,
             tags=self.cfg.tags(int(args.get("lab", 2))),
         )
@@ -300,6 +304,11 @@ class AzureAdapter(CloudAdapter):
         pipeline = PipelineJob(jobs={"drift": job}, display_name=job.display_name,
                                experiment_name=job.experiment_name, tags=job.tags)
         pipeline.settings.default_compute = compute
+        # Without this Azure ML reuses the previous run's result whenever the step's command,
+        # image and inputs are unchanged — which, for a scheduled detector, is every run. The
+        # 14:00 run of the Lab 4 exercise "completed" in zero seconds on cached output and
+        # never looked at the drifted inputs.
+        pipeline.settings.force_rerun = True
         trigger = CronTrigger(expression=cron, time_zone="UTC")
         created = client.schedules.begin_create_or_update(
             JobSchedule(name=name, trigger=trigger, create_job=pipeline,
@@ -309,10 +318,9 @@ class AzureAdapter(CloudAdapter):
 
     def scheduled(self, prefix: str = "itcs355") -> list[str]:
         """Names of the workspace's job schedules that start with `prefix`, enabled or not."""
-        from azure.ai.ml.constants import ScheduleListViewType
-
         client, _ = self._ml_client()
-        return [s.name for s in client.schedules.list(list_view_type=ScheduleListViewType.ALL)
+        # "All" includes disabled schedules, which still exist and can be re-enabled.
+        return [s.name for s in client.schedules.list(list_view_type="All")
                 if s.name.startswith(prefix)]
 
     def wait_training(self, job_id: str) -> dict[str, Any]:
