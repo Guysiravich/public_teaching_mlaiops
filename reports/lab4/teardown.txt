@@ -1,0 +1,38 @@
+== make teardown LAB=4  (2026-10-06T15:48:46Z)
+python scripts/teardown.py --lab 4 
+teardown scope: {'course': 'itcs355', 'student': 'itcs355-6688067', 'lab': '4'}
+  disable itcs355-drift: ResourceNotFoundError
+.deleted schedule itcs355-drift
+schedules left in the workspace: none
+Traceback (most recent call last):
+  File "/home/guy/itcs355/scripts/teardown.py", line 54, in <module>
+    raise SystemExit(main())
+                     ~~~~^^
+  File "/home/guy/itcs355/scripts/teardown.py", line 44, in main
+    deleted = adapter.teardown(tags, dry_run=args.dry_run)
+  File "/home/guy/itcs355/cloudlayer/azure.py", line 572, in teardown
+    _run(["az", "resource", "delete", "--ids", resource_id, "--verbose"])
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/guy/itcs355/cloudlayer/azure.py", line 77, in _run
+    raise RuntimeError(
+        f"`{' '.join(cmd)}` failed ({result.returncode}):\n{result.stdout}{result.stderr}"
+    )
+RuntimeError: `az resource delete --ids /subscriptions/<sub>/resourceGroups/itcs355-6688067/providers/Microsoft.App/managedEnvironments/itcs355-env-l4 --verbose` failed (1):
+Code: ManagedEnvironmentHasContainerApps
+Message: The specified environment itcs355-env-l4 cannot be deleted because it still contains 1 ContainerApps
+ERROR: Some resources failed to be deleted (run with `--verbose` for more information):
+/subscriptions/<sub>/resourceGroups/itcs355-6688067/providers/Microsoft.App/managedEnvironments/itcs355-env-l4
+
+make: *** [Makefile:74: teardown] Error 1
+
+== make teardown LAB=4, second run after ordering dependents first  (2026-10-06T15:49:55Z)
+python scripts/teardown.py --lab 4 
+teardown scope: {'course': 'itcs355', 'student': 'itcs355-6688067', 'lab': '4'}
+  disable itcs355-drift: ResourceNotFoundError
+.deleted schedule itcs355-drift
+schedules left in the workspace: none
+deleted /subscriptions/<sub>/resourceGroups/itcs355-6688067/providers/Microsoft.App/containerApps/itcs355-staging
+deleted /subscriptions/<sub>/resourceGroups/itcs355-6688067/providers/Microsoft.Insights/metricalerts/itcs355-drift-alert
+deleted /subscriptions/<sub>/resourceGroups/itcs355-6688067/providers/Microsoft.App/managedEnvironments/itcs355-env-l4
+deleted /subscriptions/<sub>/resourceGroups/itcs355-6688067/providers/Microsoft.Insights/actiongroups/itcs355-drift-ag
+Deletion is asynchronous: re-check the portal, and check the bill.

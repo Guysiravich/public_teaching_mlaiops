@@ -814,4 +814,10 @@ changed world.
 - [x] Scheduled drift detector with a justified threshold, alerting to a real channel
 - [x] Injected drift: alert evidence, timestamps, detection time
 - [x] Five-line post-mortem
-- [ ] `make teardown` run — TEARDOWN_PLACEHOLDER
+- [x] `make teardown` run — `make teardown LAB=4` on 6 October after the last green CD run;
+  output in [`reports/lab4/teardown.txt`](reports/lab4/teardown.txt). The schedule, the staging
+  app and environment, the alert rule and action group, the Log Analytics workspace and both
+  identities are gone; nothing tagged `lab=4` remains. The first attempt failed: the adapter
+  deleted the environment before the app inside it (`ManagedEnvironmentHasContainerApps`), so
+  `teardown()` now deletes dependents first. With the CD identity deleted, a push to main fails
+  at `azure/login` until Lab 5 recreates it; this commit is marked `[skip ci]` for that reason.

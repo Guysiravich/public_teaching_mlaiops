@@ -566,6 +566,13 @@ class AzureAdapter(CloudAdapter):
         ids = _query([
             "az", "resource", "list", "--query", f"[?{query}].id", "-o", "tsv",
         ]).split()
+        # Dependents first. `az resource list` returns no particular order, and an environment
+        # that still holds an app refuses deletion (ManagedEnvironmentHasContainerApps — the
+        # first Lab 4 teardown); an action group is still referenced by its alert rule.
+        first = ("/containerapps/", "/metricalerts/", "/onlineendpoints/")
+        last = ("/managedenvironments/", "/actiongroups/", "/userassignedidentities/")
+        ids.sort(key=lambda i: 0 if any(t in i.lower() for t in first)
+                 else 2 if any(t in i.lower() for t in last) else 1)
         if dry_run:
             return ids
         for resource_id in ids:
