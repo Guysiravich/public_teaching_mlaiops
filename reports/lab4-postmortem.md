@@ -6,7 +6,10 @@ Injected on purpose: `make inject-drift` (`--feature temp_c --mode shift --magni
 the request log `reports/lab4-traffic.log`.
 
 **What fired:**
-Azure Monitor alert `itcs355-drift-alert` (Sev2, email to the on-call address) at **14:22:39 UTC**:
+Azure Monitor alert `itcs355-drift-alert` (Sev2) at **14:22:39 UTC** — fired, but the email
+receiver had not completed Azure's new verification, so it reached nobody. Once verified, the same
+check on the same inputs fired again and the email "Activated Severity: 2 itcs355-drift-alert"
+arrived at 15:32 (README, Lab 4, failure 4). The first firing:
 `drift_threshold_ratio` 3.505 ≥ 1, written by the 14:15 scheduled drift run — temp_c PSI 0.3505
 against its 0.10 threshold over the last 500 inputs; every other feature under its limit (load_pct
 0.17 of 0.30). The run before the injection scored 0.57. Injection to alert: **32 min 16 s**.

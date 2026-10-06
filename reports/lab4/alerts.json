@@ -1,8 +1,23 @@
 [
   {
     "name": "itcs355-drift-alert",
-    "state": "Fired",
+    "state": "Resolved",
     "fired_utc": "2026-10-06T14:22:39.5434272Z",
+    "resolved_utc": "2026-10-06T14:47:41.1299948Z",
+    "severity": "Sev2"
+  },
+  {
+    "name": "itcs355-drift-alert",
+    "state": "Resolved",
+    "fired_utc": "2026-10-06T14:56:49.6027225Z",
+    "resolved_utc": "2026-10-06T15:21:54.6391009Z",
+    "severity": "Sev2"
+  },
+  {
+    "name": "itcs355-drift-alert",
+    "state": "Fired",
+    "fired_utc": "2026-10-06T15:31:51.8330441Z",
+    "resolved_utc": null,
     "severity": "Sev2"
   }
 ]

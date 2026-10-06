@@ -680,9 +680,16 @@ up report temp_c in Fahrenheit. CI on that pull request fails in the **Data cont
 FAILED tests/test_data.py::test_features_within_plausible_ranges - AssertionError: temp_c above plausible ceiling: 231.396
 ```
 
-The unit tests in the step before it pass, so the contract test is the one that stops it. Nothing
-was built, pushed or deployed, and the pull request was closed without merging.
-Evidence: PR_LINK_PLACEHOLDER
+The unit tests in the step before it pass, so the contract test is the one that stops it. The
+`build` job (image build, integration test) was skipped, so nothing was built, pushed or
+deployed, and the pull request was closed without merging.
+
+Evidence: [pull request #1](https://github.com/Guysiravich/public_teaching_mlaiops/pull/1) and its
+[failing CI run](https://github.com/Guysiravich/public_teaching_mlaiops/actions/runs/37481561827)
+— `test` job: Lint ✓, Portability audit ✓, Generate dataset ✓, Unit tests ✓, **Data contract
+tests ✗**, Model behaviour tests skipped; `secrets` ✓; `build` skipped. The assertion message
+above is from that step's log, captured in
+[`reports/lab4/ci-blocked-commit.png`](reports/lab4/ci-blocked-commit.png): `1 failed, 9 passed`.
 
 ## Dashboard and SLO (Task 4)
 
@@ -732,7 +739,12 @@ Which statistic caught which fault, run locally on all three `inject_drift` mode
 | **13:50:23** | **injection**: inputs switch to `data/current.csv`, temp_c +6 °C |
 | 14:00 | scheduled run "completed" in **zero seconds** — Azure ML reused the cached result |
 | 14:20 | 14:15 run (after the fix): temp_c PSI **0.3505**, ratio **3.505** |
-| **14:22:39** | **alert fired**, email sent |
+| **14:22:39** | **alert fired** — but no email: the address had not completed Azure's new receiver verification (failure 4 below) |
+| 14:44 | receiver re-added, verification code sent and confirmed |
+| 14:51 | one more run of the same job on the same last 500 inputs: ratio 3.505 |
+| 14:56:49 | alert fired again — still no "Fired" email; its **"Resolved" email arrived** at 15:22, a minute after the resolve |
+| 15:27 | one more run, same inputs, ratio 3.505 (the Gmail address added as a second receiver) |
+| **15:31:51** | **alert fired; "Azure: Activated Severity: 2 itcs355-drift-alert" arrived at 15:32** (Value 3.5052, Threshold 1) |
 
 **Detection time: 32 min 16 s**, of which one 15-minute cycle was lost to the cached run; without
 it the 14:00 run would have alerted at about 14:07. The dashboard shows the rolling mean moving from
@@ -758,6 +770,15 @@ changed world.
    **reused the cached result** of an identical step, so a run "completed" without reading the new
    inputs. `force_rerun` fixes it. A detector that silently stops detecting is the failure the
    post-mortem's heartbeat alert is for.
+4. **An alert that fires is not an alert that arrives.** Azure Monitor now sends an email
+   receiver a one-time code and delivers nothing to it until the code is entered; the code
+   expires in 30 minutes. The first alert (14:22:39) fired in Azure and reached nobody; the
+   second (14:56:49), fired just after verification, was not delivered either although its
+   history says the action group executed — only its "Resolved" notice arrived. The third
+   (15:31:51) arrived within a minute. Every one of them showed `ActionsTriggered` in Azure,
+   so checking the alert state would have passed on the first. The handout's "an alert that
+   actually arrived somewhere" is the right test, and the screenshot of the delivered email is
+   kept with the submission (not committed: it prints the subscription ID).
 
 ## Notes for the grader — Lab 4
 
