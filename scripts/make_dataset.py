@@ -48,7 +48,10 @@ def build(seed: int) -> pd.DataFrame:
             rows.append({
                 "reading_id": reading_id,
                 "machine_id": machine,
-                "temp_c": round(float(temp), 3),
+                # Lab 4 Task 3 — deliberately bad commit. Machines 200 and up get new sensor
+                # firmware that reports Fahrenheit under the same column name. The machines
+                # are no hotter (the label still uses Celsius); only the reading changed.
+                "temp_c": round(float(temp * 9 / 5 + 32 if machine >= 200 else temp), 3),
                 "vibration_mm_s": round(float(vib), 3),
                 "pressure_kpa": round(float(pressure), 3),
                 "hours_since_service": round(hours, 3),
