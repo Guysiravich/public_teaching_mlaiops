@@ -292,9 +292,17 @@ class AzureAdapter(CloudAdapter):
                 if "NotFound" not in str(exc) and "not found" not in str(exc).lower():
                     raise
             return name
+        # A schedule will not take a bare command job ("Unsupported job type 'CommandJob'"),
+        # so the same command runs as the single step of a pipeline job.
+        from azure.ai.ml.entities import PipelineJob
+
+        _, compute = self._ml_client()
+        pipeline = PipelineJob(jobs={"drift": job}, display_name=job.display_name,
+                               experiment_name=job.experiment_name, tags=job.tags)
+        pipeline.settings.default_compute = compute
         trigger = CronTrigger(expression=cron, time_zone="UTC")
         created = client.schedules.begin_create_or_update(
-            JobSchedule(name=name, trigger=trigger, create_job=job,
+            JobSchedule(name=name, trigger=trigger, create_job=pipeline,
                         tags=self.cfg.tags(int(args.get("lab", 4))))
         ).result()
         return created.name
