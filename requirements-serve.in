@@ -10,3 +10,5 @@ numpy==2.4.4
 scikit-learn==1.8.0
 mlflow==3.16.0
 joblib==1.4.2
+# Lab 4: /metrics for the Prometheus dashboard
+prometheus-client==0.26.0

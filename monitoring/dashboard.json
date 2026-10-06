@@ -1,25 +1,65 @@
 {
-  "_comment": "Lab 4 — dashboard as code. Portable Grafana definition; import it, or translate the panels to CloudWatch / Azure Monitor / Cloud Monitoring. Committing the dashboard is better than clicking one together, and is noted favourably.",
+  "_comment": "Lab 4 — dashboard as code. A real Grafana dashboard: monitoring/compose.yaml provisions it on start, so the panels you see are this file. Queries read the metrics service/app.py exposes at /metrics.",
+  "uid": "itcs355-predict",
   "title": "ITCS355 — Prediction service",
+  "schemaVersion": 39,
+  "version": 1,
   "refresh": "30s",
+  "time": {"from": "now-1h", "to": "now"},
+  "tags": ["itcs355", "lab4"],
   "panels": [
-    {"id": 1, "title": "Request rate", "type": "timeseries", "unit": "reqps",
-     "target": "sum(rate(http_requests_total[1m]))"},
-    {"id": 2, "title": "Error rate by class", "type": "timeseries", "unit": "percentunit",
-     "target": "sum by (status_class) (rate(http_requests_total{status_class=~\"4xx|5xx\"}[5m])) / sum(rate(http_requests_total[5m]))",
-     "_note": "4xx and 5xx must be split. 4xx is usually a caller problem; 5xx is yours."},
-    {"id": 3, "title": "Latency p50 / p95 / p99", "type": "timeseries", "unit": "ms",
+    {"id": 1, "title": "Request rate", "type": "timeseries",
+     "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+     "datasource": {"type": "prometheus", "uid": "prometheus"},
+     "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
      "targets": [
-       "histogram_quantile(0.50, sum by (le) (rate(request_latency_ms_bucket[5m])))",
-       "histogram_quantile(0.95, sum by (le) (rate(request_latency_ms_bucket[5m])))",
-       "histogram_quantile(0.99, sum by (le) (rate(request_latency_ms_bucket[5m])))"
-     ],
-     "_note": "If p99 is far above p95 in a repeating pattern, suspect cold start or a per-request model load."},
-    {"id": 4, "title": "Feature drift (PSI, rolling)", "type": "timeseries",
-     "target": "drift_psi",
-     "_note": "TODO(Lab 4): at least one feature-distribution statistic is required. Emit it from monitoring/drift.py via adapter.emit_metric."},
+       {"refId": "A", "expr": "sum(rate(http_requests_total{path=~\"/predict.*\"}[1m]))", "legendFormat": "/predict"}
+     ]},
+    {"id": 2, "title": "Error rate by class (4xx is the caller, 5xx is us)", "type": "timeseries",
+     "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+     "datasource": {"type": "prometheus", "uid": "prometheus"},
+     "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0}, "overrides": []},
+     "_note": "ignoring(status_class) group_left is required: without it the numerator (one series per class) has no partner in the label-free denominator and the panel is empty.",
+     "targets": [
+       {"refId": "A", "expr": "sum by (status_class) (rate(http_requests_total{status_class=~\"4xx|5xx\"}[5m])) / ignoring(status_class) group_left sum(rate(http_requests_total[5m]))", "legendFormat": "{{status_class}}"}
+     ]},
+    {"id": 3, "title": "Latency p50 / p95 / p99 of /predict (SLO: p95 < 300 ms)", "type": "timeseries",
+     "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+     "datasource": {"type": "prometheus", "uid": "prometheus"},
+     "fieldConfig": {"defaults": {"unit": "ms",
+       "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 300}]},
+       "custom": {"thresholdsStyle": {"mode": "line"}}}, "overrides": []},
+     "_note": "If p99 is far above p95 in a repeating pattern, suspect cold start or a per-request model load.",
+     "targets": [
+       {"refId": "A", "expr": "histogram_quantile(0.50, sum by (le) (rate(request_latency_ms_bucket{path=\"/predict\"}[5m])))", "legendFormat": "p50"},
+       {"refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(request_latency_ms_bucket{path=\"/predict\"}[5m])))", "legendFormat": "p95"},
+       {"refId": "C", "expr": "histogram_quantile(0.99, sum by (le) (rate(request_latency_ms_bucket{path=\"/predict\"}[5m])))", "legendFormat": "p99"}
+     ]},
+    {"id": 4, "title": "Feature distribution — temp_c over the last 500 inputs", "type": "timeseries",
+     "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+     "datasource": {"type": "prometheus", "uid": "prometheus"},
+     "fieldConfig": {"defaults": {"unit": "celsius"}, "overrides": []},
+     "_note": "Mean AND spread: a shift moves the mean, a change of scale moves only the standard deviation. The scheduled PSI score is in Azure Monitor (monitoring/drift_job.py).",
+     "targets": [
+       {"refId": "A", "expr": "feature_rolling_mean{feature=\"temp_c\"}", "legendFormat": "rolling mean"},
+       {"refId": "B", "expr": "feature_rolling_std{feature=\"temp_c\"}", "legendFormat": "rolling sd"}
+     ]},
     {"id": 5, "title": "Model version in production", "type": "stat",
-     "target": "model_version_info",
-     "_note": "During a canary you should see two. If you see two when you are not deploying, something is wrong."}
+     "gridPos": {"h": 6, "w": 12, "x": 0, "y": 16},
+     "datasource": {"type": "prometheus", "uid": "prometheus"},
+     "options": {"textMode": "name", "colorMode": "none", "reduceOptions": {"calcs": ["lastNotNull"]}},
+     "_note": "During a canary you should see two. If you see two when you are not deploying, something is wrong.",
+     "targets": [
+       {"refId": "A", "expr": "model_version_info == 1", "legendFormat": "version {{version}}"}
+     ]},
+    {"id": 6, "title": "Inputs in the rolling window", "type": "stat",
+     "gridPos": {"h": 6, "w": 12, "x": 12, "y": 16},
+     "datasource": {"type": "prometheus", "uid": "prometheus"},
+     "_note": "Below 500 the feature panel is averaging fewer rows than the drift threshold was set for; read it with that in mind.",
+     "options": {"colorMode": "value", "reduceOptions": {"calcs": ["lastNotNull"]}},
+     "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": [{"color": "orange", "value": null}, {"color": "green", "value": 500}]}}, "overrides": []},
+     "targets": [
+       {"refId": "A", "expr": "feature_rolling_window_rows", "legendFormat": "rows"}
+     ]}
   ]
 }

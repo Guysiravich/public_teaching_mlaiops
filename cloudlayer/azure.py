@@ -211,6 +211,12 @@ class AzureAdapter(CloudAdapter):
           experiment  experiment name shown in Azure ML (default "itcs355")
           lab         lab number for resource tags (default 2)
         """
+        client, job = self._command_job(image_uri, args)
+        return client.jobs.create_or_update(job).name
+
+    def _command_job(self, image_uri: str, args: dict[str, Any]) -> tuple[Any, Any]:
+        """Build (not submit) the command job submit_training describes. schedule() wraps the
+        same job in a trigger, so a scheduled run is exactly a submitted one."""
         import shlex
         import uuid
 
@@ -263,8 +269,43 @@ class AzureAdapter(CloudAdapter):
             environment_variables=env,
             tags=self.cfg.tags(int(args.get("lab", 2))),
         )
-        submitted = client.jobs.create_or_update(job)
-        return submitted.name
+        return client, job
+
+    def schedule(self, name: str, image_uri: str, args: dict[str, Any], cron: str) -> str:
+        """An Azure ML job schedule around the same command job submit_training sends.
+
+        Azure ML schedules are workspace objects, not ARM resources: they carry no resource
+        tags, and `make teardown` cannot find them by tag. scripts/teardown.py deletes them
+        by name — the handout's warning about schedules that outlive their endpoint.
+        """
+        from azure.ai.ml.entities import CronTrigger, JobSchedule
+
+        client, job = self._command_job(image_uri, args)
+        if not cron:
+            try:
+                client.schedules.begin_disable(name).result()
+            except Exception as exc:  # already disabled, or never created
+                print(f"  disable {name}: {exc.__class__.__name__}")
+            try:
+                client.schedules.begin_delete(name).result()
+            except Exception as exc:
+                if "NotFound" not in str(exc) and "not found" not in str(exc).lower():
+                    raise
+            return name
+        trigger = CronTrigger(expression=cron, time_zone="UTC")
+        created = client.schedules.begin_create_or_update(
+            JobSchedule(name=name, trigger=trigger, create_job=job,
+                        tags=self.cfg.tags(int(args.get("lab", 4))))
+        ).result()
+        return created.name
+
+    def scheduled(self, prefix: str = "itcs355") -> list[str]:
+        """Names of the workspace's job schedules that start with `prefix`, enabled or not."""
+        from azure.ai.ml.constants import ScheduleListViewType
+
+        client, _ = self._ml_client()
+        return [s.name for s in client.schedules.list(list_view_type=ScheduleListViewType.ALL)
+                if s.name.startswith(prefix)]
 
     def wait_training(self, job_id: str) -> dict[str, Any]:
         """Poll the job until it reaches a terminal state. Returns its final status."""
@@ -307,16 +348,30 @@ class AzureAdapter(CloudAdapter):
         identity = os.environ["SERVE_IDENTITY_ID"]
         group = self.cfg.project_id
         registry = self.cfg.container_registry.split("/")[0]
-        tags = self.cfg.tags(3)
+        # Lab 4 deploys staging from CD with RESOURCE_LAB=4, so `make teardown LAB=4` finds it.
+        tags = self.cfg.tags(int(os.environ.get("RESOURCE_LAB", "3")))
+        environment = os.environ.get("SERVE_ENVIRONMENT", _CONTAINER_APP_ENV)
 
         existing = _query(["az", "containerapp", "env", "list", "-g", group,
-                           "--query", f"[?name=='{_CONTAINER_APP_ENV}'].name", "-o", "tsv"])
+                           "--query", f"[?name=='{environment}'].name", "-o", "tsv"])
         if not existing:
-            _run(["az", "containerapp", "env", "create", "-g", group, "-n", _CONTAINER_APP_ENV,
-                  "-l", self.cfg.region, "--logs-destination", "none",
+            # Lab 4 needs the container's stdout in Log Analytics: the drift job reads the
+            # logged inputs back from there. Without a workspace, logs go nowhere.
+            workspace = os.environ.get("SERVE_LOG_WORKSPACE", "")
+            if workspace:
+                customer_id = _query(["az", "monitor", "log-analytics", "workspace", "show",
+                                      "--ids", workspace, "--query", "customerId", "-o", "tsv"])
+                key = _query(["az", "monitor", "log-analytics", "workspace", "get-shared-keys",
+                              "--ids", workspace, "--query", "primarySharedKey", "-o", "tsv"])
+                logs = ["--logs-destination", "log-analytics",
+                        "--logs-workspace-id", customer_id, "--logs-workspace-key", key]
+            else:
+                logs = ["--logs-destination", "none"]
+            _run(["az", "containerapp", "env", "create", "-g", group, "-n", environment,
+                  "-l", self.cfg.region, *logs,
                   "--tags", *[f"{k}={v}" for k, v in tags.items()], "-o", "none"])
 
-        env_id = _query(["az", "containerapp", "env", "show", "-g", group, "-n", _CONTAINER_APP_ENV,
+        env_id = _query(["az", "containerapp", "env", "show", "-g", group, "-n", environment,
                          "--query", "id", "-o", "tsv"])
         spec = {
             "location": self.cfg.region,
@@ -325,8 +380,9 @@ class AzureAdapter(CloudAdapter):
             "properties": {
                 "environmentId": env_id,
                 "configuration": {
-                    # Multiple, so Task 4 can put a canary beside the current revision.
-                    "activeRevisionsMode": "Multiple",
+                    # Multiple, so Lab 3 Task 4 can put a canary beside the current revision.
+                    # Staging (Lab 4) runs Single: each green commit replaces the last.
+                    "activeRevisionsMode": os.environ.get("SERVE_REVISIONS_MODE", "Multiple"),
                     "ingress": {"external": True, "targetPort": _SERVE_PORT, "transport": "auto"},
                     "registries": [{"server": registry, "identity": identity}],
                     "secrets": [
@@ -335,7 +391,8 @@ class AzureAdapter(CloudAdapter):
                     ],
                 },
                 "template": {
-                    "revisionSuffix": f"v{version}",
+                    # CD sets the commit, so every revision names the code it runs.
+                    "revisionSuffix": os.environ.get("REVISION_SUFFIX", f"v{version}"),
                     "containers": [{
                         "name": "predict",
                         "image": image,
@@ -390,6 +447,73 @@ class AzureAdapter(CloudAdapter):
             body = json.loads(response.read())
             body["model_version_header"] = response.headers.get("x-model-version", "")
             return body
+
+    # --- Lab 4 ---------------------------------------------------------------
+    def _token(self, scope: str) -> str:
+        from azure.identity import DefaultAzureCredential
+
+        # CLI login on a laptop, the federated identity in GitHub Actions, the compute
+        # cluster's managed identity inside an Azure ML job. No key anywhere.
+        credential = DefaultAzureCredential(process_timeout=_CLI_TIMEOUT_SECONDS)
+        return credential.get_token(scope).token
+
+    def emit_metric(self, name: str, value: float, unit: str = "None") -> None:
+        """One data point to Azure Monitor custom metrics, on the resource METRICS_RESOURCE_ID
+        (the staging container app), namespace itcs355. A metric alert on that resource
+        turns it into an email (monitoring/README in the Lab 4 section)."""
+        import datetime
+        import json
+        import urllib.request
+
+        resource = os.environ["METRICS_RESOURCE_ID"]
+        point = {
+            "time": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "data": {"baseData": {
+                "metric": name.replace(".", "_"),
+                "namespace": "itcs355",
+                "series": [{"min": value, "max": value, "sum": value, "count": 1}],
+            }},
+        }
+        request = urllib.request.Request(
+            f"https://{self.cfg.region}.monitoring.azure.com{resource}/metrics",
+            data=json.dumps(point).encode(),
+            headers={"Content-Type": "application/json",
+                     "Authorization": f"Bearer {self._token('https://monitoring.azure.com/.default')}"},
+        )
+        with urllib.request.urlopen(request, timeout=30) as response:
+            if response.status >= 300:
+                raise RuntimeError(f"emit_metric {name}: HTTP {response.status}")
+
+    def recent_inputs(self, limit: int) -> list[dict[str, float]]:
+        """The last `limit` inputs the serving container logged, read from the environment's
+        Log Analytics workspace (LOG_WORKSPACE_ID, the workspace GUID). service/app.py writes
+        one {"event":"input"} line per scored row; the platform ships stdout there."""
+        import json
+        import urllib.request
+
+        app = os.environ.get("STAGING_APP", "itcs355-staging")
+        query = (
+            "ContainerAppConsoleLogs_CL"
+            f" | where ContainerAppName_s == '{app}'"
+            " | where Log_s has '\"event\":\"input\"'"
+            f" | top {int(limit)} by TimeGenerated desc"
+            " | project Log_s"
+        )
+        request = urllib.request.Request(
+            f"https://api.loganalytics.io/v1/workspaces/{os.environ['LOG_WORKSPACE_ID']}/query",
+            data=json.dumps({"query": query, "timespan": "PT24H"}).encode(),
+            headers={"Content-Type": "application/json",
+                     "Authorization": f"Bearer {self._token('https://api.loganalytics.io/.default')}"},
+        )
+        with urllib.request.urlopen(request, timeout=60) as response:
+            tables = json.loads(response.read())["tables"]
+        rows = []
+        for (line,) in tables[0]["rows"] if tables else []:
+            try:
+                rows.append(json.loads(line)["msg"]["features"])
+            except (ValueError, KeyError, TypeError):
+                continue  # a line the logger split or truncated is skipped, not guessed at
+        return rows
 
     # --- Lab 5 (teardown is used by Lab 3's handout too) ------------------------
     def teardown(self, tags: dict[str, str], dry_run: bool = False) -> list[str]:

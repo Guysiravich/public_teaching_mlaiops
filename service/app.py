@@ -8,16 +8,19 @@ Run locally:  uvicorn service.app:app --port 8080
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import time
 import uuid
+from collections import deque
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 
 from service.schemas import BatchRequest, BatchResponse, PredictRequest, PredictResponse
 
@@ -28,6 +31,26 @@ logging.basicConfig(
 log = logging.getLogger("service")
 
 STATE: dict[str, Any] = {"model": None, "version": os.environ.get("MODEL_VERSION", "unknown")}
+
+# --- Lab 4: metrics -----------------------------------------------------------------
+# Exposed at /metrics in Prometheus text format and scraped by monitoring/compose.yaml.
+# The names match the queries in monitoring/dashboard.json; a metric emitted under one
+# name and charted under another is the "dashboard shows nothing" failure in the handout.
+REQUESTS = Counter("http_requests_total", "Requests served", ["path", "status_class"])
+LATENCY = Histogram("request_latency_ms", "Request latency in milliseconds", ["path"],
+                    buckets=(5, 10, 25, 50, 100, 200, 300, 500, 1000, 2500, 5000, 10000))
+MODEL_VERSION_INFO = Gauge("model_version_info", "1 for the model version this replica serves",
+                           ["version"])
+FEATURE_MEAN = Gauge("feature_rolling_mean", "Mean of a feature over the last inputs",
+                     ["feature"])
+FEATURE_STD = Gauge("feature_rolling_std", "Standard deviation of a feature over the last inputs",
+                    ["feature"])
+ROLLING_INPUTS = Gauge("feature_rolling_window_rows", "Inputs currently in the rolling window")
+
+# 500 rows: the smallest window whose sampling noise stays well under the drift threshold
+# (reports/lab4/threshold-study.md). A shorter window charts normal variance as drift.
+ROLLING_WINDOW = int(os.environ.get("ROLLING_WINDOW", "500"))
+RECENT: deque[dict[str, float]] = deque(maxlen=ROLLING_WINDOW)
 
 
 def _load_model():
@@ -94,9 +117,19 @@ app = FastAPI(title="ITCS355 inference", version="1.0.0", lifespan=lifespan)
 @app.middleware("http")
 async def add_request_context(request: Request, call_next):
     request_id = request.headers.get("x-request-id", str(uuid.uuid4()))
+    path = request.url.path
     started = time.perf_counter()
-    response = await call_next(request)
+    try:
+        response = await call_next(request)
+    except Exception:
+        # An unhandled error never reaches the code below; count it here or the 5xx
+        # panel reads zero during exactly the incident it exists for.
+        REQUESTS.labels(path, "5xx").inc()
+        raise
     latency_ms = (time.perf_counter() - started) * 1000
+    if path != "/metrics":  # the scraper's own requests are not traffic
+        REQUESTS.labels(path, f"{response.status_code // 100}xx").inc()
+        LATENCY.labels(path).observe(latency_ms)
     response.headers["x-request-id"] = request_id
     response.headers["x-model-version"] = str(STATE["version"])
     log.info(
@@ -133,7 +166,33 @@ def _score(rows: list[dict]) -> list[float]:
     from src.data import FEATURES
 
     frame = pd.DataFrame(rows)[FEATURES]
-    return [float(p) for p in STATE["model"].predict_proba(frame)[:, 1]]
+    scores = [float(p) for p in STATE["model"].predict_proba(frame)[:, 1]]
+    for row in rows:
+        RECENT.append(row)
+        # One line per scored input: the record the scheduled drift job reads back from
+        # the platform's log store (monitoring/drift_job.py). Inputs only — no identifiers.
+        log.info('{"event":"input","features":%s}', json.dumps({f: row[f] for f in FEATURES}))
+    return scores
+
+
+@app.get("/metrics")
+def metrics() -> Response:
+    """Prometheus scrape target. The rolling feature statistics are computed here, at scrape
+    time, so the request path pays for an append and nothing else."""
+    from src.data import FEATURES
+
+    MODEL_VERSION_INFO.clear()
+    MODEL_VERSION_INFO.labels(str(STATE["version"])).set(1)
+    window = list(RECENT)
+    ROLLING_INPUTS.set(len(window))
+    if window:
+        import numpy as np
+
+        for feature in FEATURES:
+            values = np.fromiter((row[feature] for row in window), dtype=float)
+            FEATURE_MEAN.labels(feature).set(float(values.mean()))
+            FEATURE_STD.labels(feature).set(float(values.std()))
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.post("/predict", response_model=PredictResponse)

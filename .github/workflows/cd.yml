@@ -1,8 +1,9 @@
 # ITCS355 Lab 4 — continuous deployment.
 #
 # Runs only on main, only after CI is green. Credentials come from OIDC federation, not
-# from stored keys — TODO(Lab 4): uncomment the block for YOUR provider and delete the
-# other two.
+# from stored keys: azure/login exchanges this run's GitHub token for an Azure token as the
+# user-assigned identity itcs355-gha-id, whose federated credential trusts only
+# repo:Guysiravich/public_teaching_mlaiops:environment:staging. No client secret exists.
 
 name: CD
 
@@ -18,45 +19,68 @@ permissions:
 
 jobs:
   deploy-staging:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    # workflow_run fires for every completed CI run; only a green one on a push to main
+    # deploys. A pull request's CI run never reaches this job.
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' }}
     runs-on: ubuntu-latest
     environment: staging
+    env:
+      SHA: ${{ github.event.workflow_run.head_sha }}
     steps:
       - uses: actions/checkout@v7
-
-      # --- AWS ---------------------------------------------------------------
-      # - uses: aws-actions/configure-aws-credentials@v4
-      #   with:
-      #     role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
-      #     aws-region: ${{ vars.REGION }}
-      # - run: aws ecr get-login-password --region ${{ vars.REGION }} | docker login --username AWS --password-stdin ${{ vars.CONTAINER_REGISTRY }}
+        with:
+          # The commit CI tested, not whatever main points at by the time this starts.
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       # --- Azure -------------------------------------------------------------
-      # - uses: azure/login@v2
-      #   with:
-      #     client-id: ${{ secrets.AZURE_CLIENT_ID }}
-      #     tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-      #     subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      # - run: az acr login --name ${{ vars.ACR_NAME }}
+      # The three ids are identifiers, not credentials; they live in the secret store so the
+      # subscription is not printed in a public repository's logs.
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      # --- GCP ---------------------------------------------------------------
-      # - uses: google-github-actions/auth@v2
-      #   with:
-      #     workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
-      #     service_account: ${{ secrets.GCP_DEPLOY_SA }}
-      # - run: gcloud auth configure-docker ${{ vars.REGION }}-docker.pkg.dev
+      - name: Allow the containerapp CLI extension to install itself
+        run: az config set extension.use_dynamic_install=yes_without_prompt
 
-      - name: Push image
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install
         run: |
-          echo "TODO(Lab 4): push the SHA-tagged image through your adapter"
-          # python -c "from src import config; from cloudlayer.factory import get_adapter; \
-          #   print(get_adapter(config.load()).push_image('itcs355-serve:${{ github.sha }}'))"
+          pip install --upgrade pip
+          pip install --require-hashes -r requirements.txt
 
-      - name: Deploy to staging
+      - name: Configuration from the secret store
+        # STAGING_ENV holds the cloud.env lines CD needs, including the tracking server's
+        # password. Written to cloud.env (gitignored) for this run only; src/config.py
+        # reads it like any other environment.
+        env:
+          STAGING_ENV: ${{ secrets.STAGING_ENV }}
         run: |
-          echo "TODO(Lab 4): adapter.deploy(model_ref, endpoint, instance)"
+          printf '%s\n' "$STAGING_ENV" > cloud.env
+          grep -q '^MLFLOW_TRACKING_PASSWORD=.' cloud.env || { echo "STAGING_ENV secret is incomplete"; exit 1; }
 
-      - name: Smoke test
+      - name: Build serving image
+        # Rebuilt here from the commit CI tested: the base image is pinned by digest and every
+        # package by hash, so the bytes match what the integration test ran.
+        run: docker build -f service/Dockerfile.serve -t itcs355-serve:$SHA .
+
+      - name: Push image, deploy to staging, smoke test
+        # One step, because each part needs the previous one's output: push_image returns the
+        # digest deploy() runs, deploy() returns the URL the smoke test calls.
+        env:
+          RESOURCE_LAB: "4"
+          SERVE_ENVIRONMENT: itcs355-env-l4
+          SERVE_REVISIONS_MODE: Single
+          SERVE_MIN_REPLICAS: "0"
+          SERVE_MAX_REPLICAS: "1"
         run: |
-          echo "TODO(Lab 4): adapter.invoke() with three known payloads."
+          export REVISION_SUFFIX="g${SHA:0:7}"
+          python scripts/deploy.py --alias staging --endpoint-name itcs355-staging \
+            --instance 0.5/1.0Gi --image itcs355-serve:$SHA \
+            --endpoint-file reports/lab4-staging-endpoint.txt
           echo "A deploy that is not smoke-tested is a deploy you have not verified."

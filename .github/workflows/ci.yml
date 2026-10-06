@@ -46,8 +46,9 @@ jobs:
       - name: Install
         run: |
           pip install --upgrade pip
-          pip install -r requirements.txt
-          # TODO(Lab 4): once requirements.txt carries hashes, add --require-hashes.
+          # Every package must match a hash in the lock file, so a re-published or
+          # tampered wheel fails the install instead of entering the build.
+          pip install --require-hashes -r requirements.txt
 
       - name: Lint
         # ruff is pinned in requirements.txt and installed above. Installing it unpinned
@@ -57,17 +58,21 @@ jobs:
       - name: Portability audit
         run: python scripts/portability_audit.py
 
+      # The dataset is generated, not downloaded, so the producer itself is under test:
+      # a pull request that changes what scripts/make_dataset.py writes is exactly the
+      # upstream change the data contract tests below exist to stop (Task 3).
       - name: Generate dataset
         run: python scripts/make_dataset.py
+
+      - name: Unit tests
+        # Our code, not the data: the drift statistics and the service's request handling.
+        run: pytest -q tests/test_drift.py tests/test_service.py
 
       - name: Data contract tests
         run: pytest -q tests/test_data.py
 
       - name: Model behaviour tests
         run: pytest -q tests/test_model_behaviour.py
-
-      - name: Service tests
-        run: pytest -q tests/test_service.py
 
   build:
     # Both, deliberately: nothing gets built or pushed from a commit that leaks a
@@ -90,7 +95,7 @@ jobs:
       - name: Install
         run: |
           pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install --require-hashes -r requirements.txt
 
       - name: Build training image
         run: docker buildx build --platform linux/amd64 -t itcs355:${{ github.sha }} --load .
@@ -114,7 +119,17 @@ jobs:
           curl -sf -X POST localhost:8080/predict \
             -H 'content-type: application/json' \
             -d '{"temp_c":78.4,"vibration_mm_s":3.1,"pressure_kpa":315.2,"hours_since_service":4200,"load_pct":68,"ambient_humidity":55}' \
-            | tee /dev/stderr | grep -q probability
+            | tee response.json
+          # Shape AND version: a container that answers with some other model's version
+          # is serving the wrong artefact, and "it returned a probability" would not notice.
+          python - <<'PY'
+          import json
+          body = json.load(open("response.json"))
+          assert set(body) == {"probability", "model_version"}, body
+          assert 0.0 <= body["probability"] <= 1.0, body
+          assert body["model_version"] == "${{ github.sha }}", body
+          print("\nintegration test passed: shape and model version")
+          PY
           docker stop svc
 
       # Images are tagged with the commit SHA, never `latest`. A `latest` tag makes it

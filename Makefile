@@ -12,7 +12,7 @@ ROWS ?= 100
 # reload-check needs the registry name; read it from cloud.env when not exported.
 MODEL_REGISTRY_NAME ?= $(shell grep -s '^MODEL_REGISTRY_NAME=' cloud.env | cut -d= -f2)
 
-.PHONY: help setup cloud-check data test portability-audit train image image-push reproduce verify clean teardown \
+.PHONY: monitor monitor-local monitor-down drift-schedule drift-once drift-unschedule threshold-study help setup cloud-check data test portability-audit train image image-push reproduce verify clean teardown \
         tune compare register promote reload-check train-remote tune-remote seeds-remote serve serve-image loadtest drift inject-drift pipeline cost swap-check llm-eval llm-gate \
         scan-secrets deploy smoke
 
@@ -134,6 +134,30 @@ inject-drift: ## Shift a feature's distribution on purpose
 
 drift: ## Score drift against the reference window
 	python -m monitoring.drift --current data/current.csv
+
+monitor: ## Start Prometheus + Grafana against ENDPOINT=https://<fqdn> (http://localhost:3000)
+	@test -n "$(ENDPOINT)" || { echo "usage: make monitor ENDPOINT=https://<fqdn>"; exit 1; }
+	@printf '[{"targets": ["%s"]}]\n' "$$(echo $(ENDPOINT) | sed -e 's|^https://||' -e 's|/.*||')" > monitoring/targets/staging.json
+	docker compose -f monitoring/compose.yaml up -d
+
+monitor-local: ## Start the stack against a serving container on this machine (port 8080)
+	@printf '[{"targets": ["host.docker.internal:8080"]}]\n' > monitoring/targets/local.json
+	docker compose -f monitoring/compose.yaml up -d
+
+monitor-down: ## Stop the dashboard stack
+	docker compose -f monitoring/compose.yaml down
+
+drift-schedule: image ## Run the drift job on Azure ML every 15 minutes (Task 5)
+	python scripts/drift_schedule.py --image $(IMAGE):$(TAG)
+
+drift-once: image ## One drift job run now, same job as the schedule
+	python scripts/drift_schedule.py --once --image $(IMAGE):$(TAG)
+
+drift-unschedule: ## Delete the drift schedule (teardown LAB=4 does this too)
+	python scripts/drift_schedule.py --delete
+
+threshold-study: ## Measure drift noise and harm: reports/lab4/threshold-study.md
+	python scripts/drift_threshold_study.py
 
 # --- Lab 5 -------------------------------------------------------------------
 pipeline: ## Compile pipeline/pipeline.yaml for your provider

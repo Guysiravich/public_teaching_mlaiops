@@ -33,6 +33,8 @@ WORKDIR /app
 COPY --chown=runner:runner src/ ./src/
 COPY --chown=runner:runner cloudlayer/ ./cloudlayer/
 COPY --chown=runner:runner scripts/ ./scripts/
+# Lab 4: the scheduled drift job runs from this image (python -m monitoring.drift_job).
+COPY --chown=runner:runner monitoring/ ./monitoring/
 
 # MLflow logs artifacts to ./mlruns relative to WORKDIR. /app is root-owned,
 # so the non-root runner cannot create it. Make the workdir writable.

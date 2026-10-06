@@ -2,31 +2,47 @@
 #
 # Most students write a target and stop. The third field is where the thinking is: an SLO
 # without a stated response to exhaustion is a wish, not an objective.
+#
+# Who reads the predictions: a maintenance planner deciding which machines get a technician
+# in the next 7 days (failed_within_7d). A decision on a 7-day horizon tolerates a slow or
+# missing answer for minutes; it does not tolerate a wrong one for days. The targets below
+# are set from that, not from what a web shop would need.
 
 service: itcs355-predict
 
 objectives:
   - name: availability
-    target: 0.995              # TODO(Lab 4): your number, and defend it
+    # 0.5% of 30 days is 3.6 hours a month. The planner can wait that long for a score on a
+    # 7-day decision; 99.9% (43 minutes) would cost a second always-on replica, roughly
+    # doubling the serving bill (reports/lab3-load.md, cost per 1,000), for no planning value.
+    target: 0.995
     window: 30d
     measurement: "successful responses / total responses, excluding 4xx"
     on_budget_exhausted: |
-      TODO(Lab 4): what actually happens. Freeze deploys? Page someone? Fall back to the
-      last known-good version? Accept it and revise the target? All are defensible;
-      silence is not.
+      Freeze deploys to production until the 30-day window is back inside budget: only
+      rollbacks and fixes for the cause ship, because every other change spends budget that
+      is already gone. If the cause was the platform rather than a deploy, revisit the
+      target instead of freezing work that did not cause it.
 
   - name: latency
-    target_p95_ms: 200         # TODO(Lab 4): must match the target you set in loadtest/k6.js
+    target_p95_ms: 300         # the target committed in loadtest/k6.js before Lab 3 measured anything
     window: 7d
     measurement: "p95 of /predict, measured at the endpoint, not at the client"
     on_budget_exhausted: |
-      TODO(Lab 4)
+      Open a ticket for the next working day, not a page: a slow score delays a 7-day
+      decision by seconds. The first action is capacity, not code — Lab 3 measured that
+      0.5 vCPU breaks at 5 concurrent users and 1 vCPU x 3 replicas holds 10 — and the
+      ticket stays open until a load test at the new size meets 300 ms again.
 
   - name: freshness
-    target_max_model_age_days: 30
+    # Lab 2 set monthly retraining. 30 days would breach every month the run is a day late;
+    # 35 days is the monthly schedule plus one missed week, so a breach means the schedule
+    # itself failed, not that it ran on the 31st.
+    target_max_model_age_days: 35
     window: continuous
     measurement: "days since the production model version was trained"
     on_budget_exhausted: |
-      TODO(Lab 4): this one interacts with your retraining trigger in Lab 5. Keep them
-      consistent — an SLO demanding a 30-day-old model and a 90-day retrain schedule is
-      a contradiction you should notice here rather than in production.
+      Page the model owner that the retraining schedule has failed, and keep serving the
+      current model: an old model that passed its gate is safer than retraining by hand
+      on data nobody has checked. Lab 5's retraining trigger must fire at 30 days so this
+      SLO only breaches when the trigger itself is broken.

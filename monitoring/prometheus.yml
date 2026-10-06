@@ -1,0 +1,19 @@
+# Lab 4 — Prometheus scrape configuration, mounted by monitoring/compose.yaml.
+# Targets come from files so the endpoint URL is never committed:
+#   make monitor ENDPOINT=https://<fqdn>   writes targets/staging.json, then starts the stack
+#   make monitor-local                     scrapes a serving container on this machine
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: staging
+    scheme: https
+    metrics_path: /metrics
+    file_sd_configs:
+      - files: [/etc/prometheus/targets/staging.json]
+  - job_name: local
+    scheme: http
+    metrics_path: /metrics
+    file_sd_configs:
+      - files: [/etc/prometheus/targets/local.json]

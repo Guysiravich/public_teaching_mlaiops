@@ -1,0 +1,28 @@
+# Lab 4 — the dashboard stack: Prometheus scrapes /metrics, Grafana shows monitoring/dashboard.json.
+#   make monitor ENDPOINT=https://<fqdn>     then open http://localhost:3000
+#   make monitor-down
+# Images pinned by digest, as every image in this repository is (Lab 1). Ports bind to
+# localhost only; anonymous viewing is on because nothing here leaves this machine.
+services:
+  prometheus:
+    image: prom/prometheus:v3.7.3@sha256:49214755b6153f90a597adcbff0252cc61069f8ab69ce8411285cd4a560e8038
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./targets:/etc/prometheus/targets:ro
+    ports: ["127.0.0.1:9090:9090"]
+    extra_hosts: ["host.docker.internal:host-gateway"]   # make monitor-local on Linux
+  grafana:
+    image: grafana/grafana:12.2.1@sha256:35c41e0fd0295f5d0ee5db7e780cf33506abfaf47686196f825364889dee878b
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/dashboard.json
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./dashboard.json:/var/lib/grafana/dashboards/dashboard.json:ro
+      - grafana-data:/var/lib/grafana   # keeps the first-start migrations (minutes on WSL) to the first start
+    ports: ["127.0.0.1:3000:3000"]
+    depends_on: [prometheus]
+
+volumes:
+  grafana-data:

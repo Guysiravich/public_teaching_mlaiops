@@ -31,3 +31,6 @@ infra/tracking-server/auth.caddy
 # Instructor material lives in the private teaching repository. If this path ever
 # reappears here it is a mistake, not a convenience.
 instructor/
+
+# Lab 4: make inject-drift output, regenerated on demand
+data/current.csv

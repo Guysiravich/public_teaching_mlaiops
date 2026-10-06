@@ -18,6 +18,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from cloudlayer.factory import get_adapter
 from src import config
 
+# Azure ML schedules are workspace objects without resource tags, so the tag search below
+# never finds them — and a schedule that outlives its endpoint keeps running jobs against a
+# deleted service (Lab 4 handout). They are deleted by name, explicitly.
+SCHEDULES = {"4": ["itcs355-drift"]}
+
 
 def main() -> int:
     ap = argparse.ArgumentParser()
@@ -28,7 +33,15 @@ def main() -> int:
     cfg = config.load()
     tags = cfg.tags(int(args.lab))
     print(f"teardown scope: {tags}")
-    deleted = get_adapter(cfg).teardown(tags, dry_run=args.dry_run)
+    adapter = get_adapter(cfg)
+    for name in SCHEDULES.get(str(args.lab), []):
+        if args.dry_run:
+            print(f"would delete schedule {name}")
+        else:
+            print(f"deleted schedule {adapter.schedule(name, '', {}, '')}")
+    if SCHEDULES.get(str(args.lab)) and hasattr(adapter, "scheduled"):
+        print(f"schedules left in the workspace: {adapter.scheduled() or 'none'}")
+    deleted = adapter.teardown(tags, dry_run=args.dry_run)
     if not deleted:
         print("nothing carried those tags")
     for item in deleted:

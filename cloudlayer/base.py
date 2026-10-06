@@ -58,6 +58,19 @@ class CloudAdapter(ABC):
     def emit_metric(self, name: str, value: float, unit: str = "None") -> None:
         raise NotImplementedError("Lab 4")
 
+    # Two additions beyond the eleven, both for Lab 4 Task 5. The scheduled drift job has to
+    # read what production was sent and has to be put on a schedule; both are provider
+    # calls, and provider calls live here and nowhere else.
+    def recent_inputs(self, limit: int) -> list[dict[str, float]]:
+        """The feature values of the last `limit` scored requests, newest first, as the
+        serving platform's log store recorded them."""
+        raise NotImplementedError("Lab 4")
+
+    def schedule(self, name: str, image_uri: str, args: dict[str, Any], cron: str) -> str:
+        """Run submit_training(image_uri, args) on a cron schedule. Returns the schedule id.
+        `cron` is five fields in UTC. Passing cron="" deletes the schedule instead."""
+        raise NotImplementedError("Lab 4")
+
     # --- Lab 5 ---------------------------------------------------------------
     def generate(self, prompt: str, params: dict[str, Any]) -> dict[str, Any]:
         """Call a managed LLM endpoint once. Returns at least:

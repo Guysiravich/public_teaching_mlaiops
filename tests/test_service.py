@@ -87,3 +87,34 @@ def test_batch_matches_singles(client):
 def test_batch_size_limit_enforced(client):
     r = client.post("/predict/batch", json={"rows": [VALID] * 101})
     assert r.status_code == 422
+
+
+def _metric(text: str, prefix: str) -> float:
+    lines = [line for line in text.splitlines() if line.startswith(prefix)]
+    assert lines, f"{prefix} not exposed"
+    return float(lines[0].rsplit(" ", 1)[1])
+
+
+def test_metrics_split_errors_by_class(client):
+    """The dashboard's error panel separates 4xx (the caller's fault) from 5xx (ours).
+    A 422 that landed in the 5xx series would page someone for a client's typo."""
+    before = client.get("/metrics").text
+    key_4xx = 'http_requests_total{path="/predict",status_class="4xx"}'
+    old_4xx = _metric(before, key_4xx) if key_4xx in before else 0.0
+    client.post("/predict", json={**VALID, "load_pct": 250.0})
+    after = client.get("/metrics").text
+    assert _metric(after, key_4xx) == old_4xx + 1
+    assert 'path="/metrics"' not in after, "the scraper's own requests counted as traffic"
+    assert _metric(after, 'model_version_info{version="test-1"}') == 1.0
+
+
+def test_metrics_rolling_feature_statistic_tracks_inputs(client):
+    """The feature-distribution panel must move when the inputs move — the Task 6 shift."""
+    from service.app import RECENT
+
+    RECENT.clear()
+    for _ in range(20):
+        client.post("/predict", json={**VALID, "temp_c": 100.0})
+    text = client.get("/metrics").text
+    assert _metric(text, 'feature_rolling_mean{feature="temp_c"}') == pytest.approx(100.0)
+    assert _metric(text, "feature_rolling_window_rows") == 20.0
