@@ -12,7 +12,7 @@ ROWS ?= 100
 # reload-check needs the registry name; read it from cloud.env when not exported.
 MODEL_REGISTRY_NAME ?= $(shell grep -s '^MODEL_REGISTRY_NAME=' cloud.env | cut -d= -f2)
 
-.PHONY: guardrail-demo monitor monitor-local monitor-down drift-schedule drift-once drift-unschedule threshold-study help setup cloud-check data test portability-audit train image image-push reproduce verify clean teardown \
+.PHONY: swap-demo swap-down guardrail-demo monitor monitor-local monitor-down drift-schedule drift-once drift-unschedule threshold-study help setup cloud-check data test portability-audit train image image-push reproduce verify clean teardown \
         tune compare register promote reload-check train-remote tune-remote seeds-remote serve serve-image loadtest drift inject-drift pipeline cost swap-check llm-eval llm-gate \
         scan-secrets deploy smoke
 
@@ -177,6 +177,13 @@ guardrail-demo: ## Task 8: the 0.88 machine talked into no_action, and the guard
 
 cost: ## Build the cost report
 	python scripts/cost_report.py --estimate $(EST) --actual $(ACT) --rps $(RPS) --instance $(INSTANCE)
+
+swap-demo: ## Task 4: upload, download and invoke through the AWS adapter (emulated; see README)
+	docker compose -f portability/localstack.yaml up -d
+	set -a; . ./portability/aws.env; set +a; python scripts/portability_demo.py
+
+swap-down: ## Stop the emulator
+	docker compose -f portability/localstack.yaml down
 
 swap-check: ## Prove the portability seam against a second provider
 	python scripts/portability_swap_check.py --second-provider $(SECOND)

@@ -34,3 +34,6 @@ instructor/
 
 # Lab 4: make inject-drift output, regenerated on demand
 data/current.csv
+
+# Lab 5: the Lambda bundle, rebuilt by make swap-demo
+build/

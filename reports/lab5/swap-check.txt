@@ -1,0 +1,19 @@
+## Run 1: exactly as the course ships it — Azure cloud.env, provider swapped to aws
+primary   azure
+secondary aws
+
+  [FAIL            ] upload  ValueError: expected s3://bucket/key, got 'https://itcs3556688067.blob.core.windows.net/itcs355/itcs355' — is BLOB_URI still another provider's address?
+  [FAIL            ] download  ValueError: expected s3://bucket/key, got 'https://itcs3556688067.blob.core.windows.net/itcs355/itcs355/portability/probe.txt' — is BLOB_URI still another provider's address?
+  [FAIL            ] invoke  NoCredentialsError: Unable to locate credentials
+
+Write-up (Lab 5 Task 4), half a page:
+
+## Run 2: Azure cloud.env, plus the AWS storage settings from portability/aws.env (all but CLOUD_PROVIDER)
+primary   azure
+secondary aws
+
+  [PASS            ] upload  
+  [PASS            ] download  
+  [FAIL            ] invoke  RuntimeError: HTTP 422 from itcs355-6688067: {'detail': '1 validation error for BatchRequest\nrows\n  List should have at least 1 item after validation, not 0 [type=too_short, input_value=[], input_type=list]\n    For further information visit https://errors.pydantic.dev/2.13/v/too_short'}
+
+Write-up (Lab 5 Task 4), half a page:

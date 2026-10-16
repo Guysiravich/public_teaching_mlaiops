@@ -1,0 +1,13 @@
+# Lab 5 Task 4 — swap demonstration, 2026-10-16 17:09:15 UTC
+
+CLOUD_PROVIDER=aws  BLOB_URI=s3://itcs355-portability/lab5  AWS_ENDPOINT_URL=http://localhost:4566
+
+adapter: AwsAdapter
+upload    sensors.csv (321,437 bytes) -> s3://itcs355-portability/lab5/data/raw/sensors.csv
+download  s3://itcs355-portability/lab5/data/raw/sensors.csv -> sensors.csv, sha256 identical: True
+invoke    single row: p=0.009856 version=local-7f0d8fca header=local-7f0d8fca (first call 9.0 s, cold start)
+invoke    batch of 3: [0.009856, 0.695794, 0.00232] (77 ms warm)
+          same model scored locally: [0.009856, 0.695794, 0.00232]  max difference 4.34e-19
+invoke    out-of-range load_pct -> HTTP 422 from itcs355-6688067: {'detail': '1 validation error for PredictRequest\nload_pct...
+
+SWAP DEMONSTRATED: upload, download and invoke through the AWS adapter, same model, same answers.

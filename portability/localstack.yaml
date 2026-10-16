@@ -1,0 +1,11 @@
+# Lab 5 Task 4 — the second provider, emulated. No AWS account with billing was available
+# (README, Lab 5, Task 4: a recorded deviation). S3 and Lambda only; the free edition has no
+# SageMaker, so the serving logic runs as a Lambda function.
+services:
+  localstack:
+    image: localstack/localstack:4.9@sha256:59373b4a27dba3ec15c4db0b7455f0cb68c8a42300e2cbbe362b440f9a131697
+    ports: ["127.0.0.1:4566:4566"]
+    environment:
+      SERVICES: s3,lambda
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock   # Lambda functions run as sibling containers
