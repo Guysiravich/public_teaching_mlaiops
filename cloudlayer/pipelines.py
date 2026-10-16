@@ -80,7 +80,7 @@ def compile_azure(spec: dict[str, Any]):
     builders: dict[str, Any] = {}
     for step in spec["steps"]:
         text = " ".join(step["command"])
-        text = re.sub(r"\{(inputs|outputs)\.(\w+)\}", r"${{.}}", text)
+        text = re.sub(r"\{(inputs|outputs)\.(\w+)\}", r"${{\1.\2}}", text)
         builders[step["name"]] = command(
             display_name=step["name"], command=f"cd /app && {text}",
             environment=env, compute=compute, environment_variables=variables,
