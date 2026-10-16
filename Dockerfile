@@ -35,6 +35,8 @@ COPY --chown=runner:runner cloudlayer/ ./cloudlayer/
 COPY --chown=runner:runner scripts/ ./scripts/
 # Lab 4: the scheduled drift job runs from this image (python -m monitoring.drift_job).
 COPY --chown=runner:runner monitoring/ ./monitoring/
+# Lab 5: the pipeline's validate step runs the data contract tests inside this image.
+COPY --chown=runner:runner tests/ ./tests/
 
 # MLflow logs artifacts to ./mlruns relative to WORKDIR. /app is root-owned,
 # so the non-root runner cannot create it. Make the workdir writable.
