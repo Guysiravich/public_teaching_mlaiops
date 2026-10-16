@@ -72,6 +72,17 @@ class CloudAdapter(ABC):
         raise NotImplementedError("Lab 4")
 
     # --- Lab 5 ---------------------------------------------------------------
+    # Two more beyond the eleven, for the Lab 5 pipeline: its steps run in the training image,
+    # as the cluster's identity, with no CLI and no credentials in their environment.
+    def secret(self, name: str) -> str:
+        """Read one secret from the provider's secret store as the caller's identity."""
+        raise NotImplementedError("Lab 5")
+
+    def rollout(self, endpoint: str, model_version: str) -> str:
+        """Point an existing endpoint at another registered model version. Returns the new
+        revision. Unlike deploy(), it creates nothing: the endpoint must already exist."""
+        raise NotImplementedError("Lab 5")
+
     def generate(self, prompt: str, params: dict[str, Any]) -> dict[str, Any]:
         """Call a managed LLM endpoint once. Returns at least:
 

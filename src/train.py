@@ -79,6 +79,12 @@ def main() -> None:
             "n_train_rows": len(train_df),
             "n_val_rows": len(val_df),
             "n_test_rows": len(test_df),
+            # The three lineage fields register_model requires, as src/tune.py sets them. In the
+            # Lab 5 pipeline the data comes from the ingest step, not DVC, so its version is
+            # the content fingerprint of the file this run actually read.
+            "data_version": dvc_md5 if dvc_md5 not in ("", "untracked") else f"sha256:{fingerprint}",
+            "training_job_id": os.environ.get("TRAINING_JOB_ID", "local"),
+            "image_digest": os.environ.get("IMAGE_DIGEST", "local"),
         })
 
         model = RandomForestClassifier(
@@ -110,8 +116,10 @@ def main() -> None:
         print(json.dumps({"seed": seed, "data_fingerprint": fingerprint, **metrics}, indent=2))
         if args.metrics_out:
             args.metrics_out.parent.mkdir(parents=True, exist_ok=True)
+            # run_id: the Lab 5 pipeline's register step registers exactly this run.
             args.metrics_out.write_text(json.dumps(
-                {"seed": seed, "data_fingerprint": fingerprint, **metrics}, indent=2))
+                {"seed": seed, "data_fingerprint": fingerprint, **metrics,
+                 "run_id": mlflow.active_run().info.run_id}, indent=2))
 
 
 if __name__ == "__main__":

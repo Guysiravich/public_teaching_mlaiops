@@ -4,49 +4,76 @@
 # Pipelines, Azure ML Pipelines, or Vertex AI Pipelines. Keeping the DAG here rather than
 # in provider SDK calls is what makes the pipeline portable, and it is why every step is
 # a container rather than a function.
+#
+# Every step runs scripts/pipeline_step.py <step> in the training image, so the logic is in
+# the image and this file only wires directories: {outputs.x} is a folder the step writes,
+# {inputs.x} one it reads, and `inputs` names the upstream step output that feeds it.
 
 name: itcs355-training-pipeline
-schedule: "0 2 * * 0"          # TODO(Lab 5): justify this in your README, or change it
+
+# 02:00 UTC on the 1st of each month. Lab 2 chose monthly retraining for this problem (a
+# 7-day failure label and a fleet whose behaviour changes with seasons, not days), and Lab 4's
+# freshness SLO allows a model 35 days old: a monthly run leaves a week to notice a failed
+# one. Weekly ("0 2 * * 0", the default here) would retrain four times on data that has barely
+# changed, and the evaluation gate would reject most of them as noise anyway — paying for a
+# node each time to register nothing. The README compares this with data-volume and drift
+# triggers (Task 3).
+schedule: "0 2 1 * *"
 
 steps:
   - name: ingest
-    image: "${CONTAINER_REGISTRY}/itcs355:${IMAGE_TAG}"
-    command: ["python", "scripts/make_dataset.py"]
+    image: "${PIPELINE_IMAGE}"
+    command: ["python", "scripts/pipeline_step.py", "ingest", "--out", "{outputs.raw_data}"]
     outputs: [raw_data]
 
   - name: validate
-    image: "${CONTAINER_REGISTRY}/itcs355:${IMAGE_TAG}"
-    command: ["pytest", "-q", "tests/test_data.py"]
+    image: "${PIPELINE_IMAGE}"
+    command: ["python", "scripts/pipeline_step.py", "validate",
+              "--data", "{inputs.raw_data}", "--out", "{outputs.contract}"]
+    inputs: {raw_data: ingest.raw_data}
+    outputs: [contract]
     depends_on: [ingest]
     on_failure: abort
     # Aborting here is the point. A pipeline that trains on data failing its own contract
     # produces a model nobody should trust, and it will do so silently.
 
   - name: train
-    image: "${CONTAINER_REGISTRY}/itcs355:${IMAGE_TAG}"
-    command: ["python", "-m", "src.train", "--metrics-out", "/outputs/metrics.json"]
+    image: "${PIPELINE_IMAGE}"
+    command: ["python", "scripts/pipeline_step.py", "train",
+              "--data", "{inputs.raw_data}", "--after", "{inputs.contract}",
+              "--out", "{outputs.metrics}"]
+    inputs: {raw_data: ingest.raw_data, contract: validate.contract}
     depends_on: [validate]
     instance: "${TRAIN_INSTANCE}"
-    spot: true
-    outputs: [model, metrics]
+    spot: false    # see README: the workspace's low-priority quota was 0 in Lab 2
+    outputs: [metrics]
 
   - name: evaluate
-    image: "${CONTAINER_REGISTRY}/itcs355:${IMAGE_TAG}"
-    command: ["python", "scripts/evaluation_gate.py", "--metrics", "/outputs/metrics.json"]
+    image: "${PIPELINE_IMAGE}"
+    command: ["python", "scripts/pipeline_step.py", "evaluate",
+              "--metrics", "{inputs.metrics}", "--out", "{outputs.gate_decision}"]
+    inputs: {metrics: train.metrics}
     depends_on: [train]
     outputs: [gate_decision]
 
   - name: register
-    image: "${CONTAINER_REGISTRY}/itcs355:${IMAGE_TAG}"
-    command: ["python", "scripts/register.py"]
+    image: "${PIPELINE_IMAGE}"
+    command: ["python", "scripts/pipeline_step.py", "register", "--metrics", "{inputs.metrics}",
+              "--decision", "{inputs.gate_decision}", "--out", "{outputs.registered}"]
+    inputs: {metrics: train.metrics, gate_decision: evaluate.gate_decision}
     depends_on: [evaluate]
+    outputs: [registered]
     condition: "gate_decision == 'pass'"
-    # TODO(Lab 5): a pipeline that registers unconditionally has no gate. The condition
-    # must be real, and the grader will try to make it fail.
+    # The condition is real twice over. scripts/evaluation_gate.py exits non-zero when the
+    # candidate does not beat the registry's `staging` version by MIN_IMPROVEMENT, and a step
+    # whose upstream failed never starts; the register step also reads gate_decision itself and
+    # refuses on 'fail'. `make gate-fail-demo` runs the pipeline against an incumbent no
+    # candidate can beat and shows register and deploy never starting.
 
   - name: deploy_staging
-    image: "${CONTAINER_REGISTRY}/itcs355:${IMAGE_TAG}"
-    command: ["python", "scripts/deploy.py", "--target", "staging"]
+    image: "${PIPELINE_IMAGE}"
+    command: ["python", "scripts/pipeline_step.py", "deploy", "--registered", "{inputs.registered}"]
+    inputs: {registered: register.registered}
     depends_on: [register]
 
 tags:

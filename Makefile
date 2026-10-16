@@ -12,7 +12,7 @@ ROWS ?= 100
 # reload-check needs the registry name; read it from cloud.env when not exported.
 MODEL_REGISTRY_NAME ?= $(shell grep -s '^MODEL_REGISTRY_NAME=' cloud.env | cut -d= -f2)
 
-.PHONY: swap-demo swap-down guardrail-demo monitor monitor-local monitor-down drift-schedule drift-once drift-unschedule threshold-study help setup cloud-check data test portability-audit train image image-push reproduce verify clean teardown \
+.PHONY: gate-fail-demo pipeline-schedule pipeline-unschedule swap-demo swap-down guardrail-demo monitor monitor-local monitor-down drift-schedule drift-once drift-unschedule threshold-study help setup cloud-check data test portability-audit train image image-push reproduce verify clean teardown \
         tune compare register promote reload-check train-remote tune-remote seeds-remote serve serve-image loadtest drift inject-drift pipeline cost swap-check llm-eval llm-gate \
         scan-secrets deploy smoke
 
@@ -160,9 +160,17 @@ threshold-study: ## Measure drift noise and harm: reports/lab4/threshold-study.m
 	python scripts/drift_threshold_study.py
 
 # --- Lab 5 -------------------------------------------------------------------
-pipeline: ## Compile pipeline/pipeline.yaml for your provider
-	python -c "from cloudlayer.pipelines import compile_for; from src import config; \
-	compile_for(config.load().provider)"
+pipeline: image ## Task 1: push the image and run the managed pipeline once
+	python scripts/pipeline_run.py --image $(IMAGE):$(TAG)
+
+gate-fail-demo: image ## Task 1: the same run against an incumbent of 0.99 — register must not run
+	-python scripts/pipeline_run.py --image $(IMAGE):$(TAG) --incumbent 0.99
+
+pipeline-schedule: image ## Task 3: schedule the pipeline (CRON= overrides pipeline.yaml)
+	python scripts/pipeline_run.py --image $(IMAGE):$(TAG) --schedule $(CRON)
+
+pipeline-unschedule: ## Task 3: delete the pipeline schedule
+	python scripts/pipeline_run.py --unschedule
 
 llm-eval: ## Run the LLM golden set against recorded responses (offline, free)
 	python scripts/llm_eval.py --out reports/llm_eval-baseline.json

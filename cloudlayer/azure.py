@@ -367,6 +367,9 @@ class AzureAdapter(CloudAdapter):
         # Lab 4 deploys staging from CD with RESOURCE_LAB=4, so `make teardown LAB=4` finds it.
         tags = self.cfg.tags(int(os.environ.get("RESOURCE_LAB", "3")))
         environment = os.environ.get("SERVE_ENVIRONMENT", _CONTAINER_APP_ENV)
+        # The subscription allows one Container Apps environment per region, and East Asia's
+        # is the capstone's (Lab 5), so serving may live in another region than the rest.
+        location = os.environ.get("SERVE_REGION", self.cfg.region)
 
         existing = _query(["az", "containerapp", "env", "list", "-g", group,
                            "--query", f"[?name=='{environment}'].name", "-o", "tsv"])
@@ -390,13 +393,13 @@ class AzureAdapter(CloudAdapter):
             # Multiple revision mode (Lab 3) and a revision suffix (Lab 4). Apps still run on
             # the Consumption profile, billed per second like before, inside the free grant.
             _run(["az", "containerapp", "env", "create", "-g", group, "-n", environment,
-                  "-l", self.cfg.region, "--environment-mode", "WorkloadProfiles", *logs,
+                  "-l", location, "--environment-mode", "WorkloadProfiles", *logs,
                   "--tags", *[f"{k}={v}" for k, v in tags.items()], "-o", "none"])
 
         env_id = _query(["az", "containerapp", "env", "show", "-g", group, "-n", environment,
                          "--query", "id", "-o", "tsv"])
         spec = {
-            "location": self.cfg.region,
+            "location": location,
             "tags": tags,
             "identity": {"type": "UserAssigned", "userAssignedIdentities": {identity: {}}},
             "properties": {
@@ -553,6 +556,64 @@ class AzureAdapter(CloudAdapter):
         return rows
 
     # --- Lab 5 ---------------------------------------------------------------
+    def _arm(self, method: str, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
+        """One ARM REST call as the caller's identity. The pipeline image has no az CLI."""
+        import json
+        import urllib.request
+
+        request = urllib.request.Request(
+            f"https://management.azure.com{path}", method=method,
+            data=json.dumps(body).encode() if body is not None else None,
+            headers={"Content-Type": "application/json",
+                     "Authorization": f"Bearer {self._token('https://management.azure.com/.default')}"},
+        )
+        with urllib.request.urlopen(request, timeout=120) as response:
+            raw = response.read()
+        return json.loads(raw) if raw else {}
+
+    def secret(self, name: str) -> str:
+        """A secret from Key Vault KEY_VAULT_NAME. The training identity holds "Key Vault Secrets
+        User" on the two secrets it needs and on nothing else in the vault."""
+        import json
+        import urllib.request
+
+        vault = os.environ["KEY_VAULT_NAME"]
+        request = urllib.request.Request(
+            f"https://{vault}.vault.azure.net/secrets/{name}?api-version=7.4",
+            headers={"Authorization": f"Bearer {self._token('https://vault.azure.net/.default')}"},
+        )
+        with urllib.request.urlopen(request, timeout=60) as response:
+            return json.loads(response.read())["value"]
+
+    def rollout(self, endpoint: str, model_version: str) -> str:
+        """A new revision of an existing container app, serving another registered version.
+
+        PATCH, not PUT: a GET does not return secret values, so writing the whole app back
+        would blank the tracking server's password. Only the template moves.
+        """
+        import time
+        import uuid
+
+        subscription = _parse_training_target(self.cfg.training_target)[0]
+        path = (f"/subscriptions/{subscription}/resourceGroups/{self.cfg.project_id}"
+                f"/providers/Microsoft.App/containerApps/{endpoint}?api-version=2024-03-01")
+        app = self._arm("GET", path)
+        template = app["properties"]["template"]
+        for container in template["containers"]:
+            env = [e for e in container.get("env", []) if e["name"] != "MODEL_VERSION"]
+            container["env"] = env + [{"name": "MODEL_VERSION", "value": str(model_version)}]
+        template["revisionSuffix"] = f"v{model_version}-{uuid.uuid4().hex[:5]}"
+        self._arm("PATCH", path, {"properties": {"template": template}})
+        for _ in range(90):
+            state = self._arm("GET", path)["properties"]
+            if state.get("provisioningState") == "Succeeded" and \
+                    state.get("latestRevisionName", "").endswith(template["revisionSuffix"]):
+                return state["latestRevisionName"]
+            if state.get("provisioningState") == "Failed":
+                raise RuntimeError(f"rollout of {endpoint} failed")
+            time.sleep(10)
+        raise RuntimeError(f"rollout of {endpoint} did not finish")
+
     def generate(self, prompt: str, params: dict[str, Any]) -> dict[str, Any]:
         """One chat completion from an Azure OpenAI deployment.
 

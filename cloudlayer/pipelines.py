@@ -37,13 +37,105 @@ def compile_aws(spec: dict[str, Any]):
 
 
 def compile_azure(spec: dict[str, Any]):
-    """Azure ML Pipelines.
+    """Azure ML Pipelines: one command node per step, wired by the YAML's inputs and outputs.
 
-    Each step becomes a command component; the DAG is expressed as a @pipeline function.
-    Conditions use azure.ai.ml.dsl.condition, which is closer to this YAML than the other
-    two providers' equivalents.
+    Returns (ml_client, pipeline_job); submit() and schedule() below send it. Mapping:
+      * {inputs.x} / {outputs.x}  ->  ${{inputs.x}} / ${{outputs.x}}, uri_folder each;
+        outputs land in the workspace's default datastore (a pipeline step rejects a raw
+        wasbs:// output path — Lab 4).
+      * depends_on  ->  data dependencies: Azure ML orders steps by what they consume, so
+        validate writes a `contract` folder that train consumes, purely to order them.
+      * on_failure: abort, and condition  ->  continue_on_step_failure = False: a step whose
+        upstream failed never starts. The gate step exits non-zero on 'fail', so register
+        and deploy_staging are skipped. azure.ai.ml.dsl.condition exists, but it needs a
+        control-flow output and turns a rejected candidate into a successful run; here a
+        rejection shows as a pipeline stopped at evaluate, which is what it is.
+      * force_rerun  ->  True: otherwise identical steps are served from cache (the Lab 4
+        drift job "ran" in zero seconds that way).
+    Every step runs as the compute cluster's user-assigned identity (the training identity).
     """
-    raise NotImplementedError("TODO Lab 5: build an azure.ai.ml pipeline job")
+    import re
+
+    from azure.ai.ml import Input, Output, command
+    from azure.ai.ml.entities import Environment, PipelineJob
+
+    from cloudlayer.factory import get_adapter
+    from src import config
+
+    adapter = get_adapter(config.load(strict=False))
+    client, compute = adapter._ml_client()
+    env = Environment(image=spec["steps"][0]["image"])
+    variables = {k: os.environ[k] for k in PIPELINE_ENV if os.environ.get(k)}
+    # Which of the cluster's identities DefaultAzureCredential should use inside the job. Kept
+    # out of the laptop's own environment, where it would hijack the developer's CLI login.
+    if os.environ.get("AZURE_CLIENT_ID_TRAIN"):
+        variables["AZURE_CLIENT_ID"] = os.environ["AZURE_CLIENT_ID_TRAIN"]
+    # Azure ML replaces MLFLOW_TRACKING_URI in every job with its own store (Lab 2); pass ours
+    # under another name, and scripts/pipeline_step.py restores it.
+    if "MLFLOW_TRACKING_URI" in variables:
+        variables["ITCS355_MLFLOW_TRACKING_URI"] = variables.pop("MLFLOW_TRACKING_URI")
+
+    nodes: dict[str, Any] = {}
+    for step in spec["steps"]:
+        text = " ".join(step["command"])
+        text = re.sub(r"\{(inputs|outputs)\.(\w+)\}", r"${{\1.\2}}", text)
+        node = command(
+            name=step["name"], display_name=step["name"], command=f"cd /app && {text}",
+            environment=env, compute=compute, environment_variables=variables,
+            inputs={name: Input(type="uri_folder") for name in step.get("inputs", {})},
+            outputs={name: Output(type="uri_folder") for name in step.get("outputs", [])},
+        )
+        for name, source in step.get("inputs", {}).items():
+            upstream, output = source.split(".")
+            node.inputs[name] = nodes[upstream].outputs[output]
+        nodes[step["name"]] = node
+
+    job = PipelineJob(jobs=nodes, display_name=spec["name"],
+                      experiment_name="itcs355-lab5-pipeline",
+                      tags={k: str(v) for k, v in spec.get("tags", {}).items()})
+    job.settings.default_compute = compute
+    job.settings.continue_on_step_failure = False
+    job.settings.force_rerun = True
+    return client, job
+
+
+def submit(client, job, wait: bool = True) -> dict[str, Any]:
+    """Submit a compiled pipeline; with wait, return each step's final status."""
+    import time
+
+    run = client.jobs.create_or_update(job)
+    print(f"submitted {run.name}: {run.studio_url}", flush=True)
+    if not wait:
+        return {"name": run.name}
+    while client.jobs.get(run.name).status not in ("Completed", "Failed", "Canceled"):
+        time.sleep(30)
+    final = client.jobs.get(run.name)
+    steps = {child.display_name: child.status
+             for child in client.jobs.list(parent_job_name=run.name)}
+    return {"name": run.name, "status": final.status, "steps": steps}
+
+
+def schedule(client, job, name: str, cron: str | None) -> str:
+    """Put the compiled pipeline on a cron schedule (UTC); cron=None deletes it."""
+    from azure.ai.ml.entities import CronTrigger, JobSchedule
+
+    if cron is None:
+        try:
+            client.schedules.begin_disable(name).result()
+        except Exception:
+            pass
+        client.schedules.begin_delete(name).result()
+        return name
+    return client.schedules.begin_create_or_update(JobSchedule(
+        name=name, trigger=CronTrigger(expression=cron, time_zone="UTC"), create_job=job,
+        tags={"course": "itcs355", "lab": "5"})).result().name
+
+
+# Configuration the steps read, passed into every node (none of it secret: the tracking
+# server's password comes from Key Vault inside the step).
+PIPELINE_ENV = ("CLOUD_PROVIDER", "PROJECT_ID", "REGION", "MLFLOW_TRACKING_URI",
+                "MODEL_REGISTRY_NAME", "KEY_VAULT_NAME", "AZURE_CLIENT_ID", "TRAINING_TARGET",
+                "STAGING_APP", "GIT_COMMIT", "IMAGE_DIGEST", "GATE_INCUMBENT")
 
 
 def compile_gcp(spec: dict[str, Any]):
