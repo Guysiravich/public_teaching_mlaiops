@@ -12,7 +12,7 @@ ROWS ?= 100
 # reload-check needs the registry name; read it from cloud.env when not exported.
 MODEL_REGISTRY_NAME ?= $(shell grep -s '^MODEL_REGISTRY_NAME=' cloud.env | cut -d= -f2)
 
-.PHONY: monitor monitor-local monitor-down drift-schedule drift-once drift-unschedule threshold-study help setup cloud-check data test portability-audit train image image-push reproduce verify clean teardown \
+.PHONY: guardrail-demo monitor monitor-local monitor-down drift-schedule drift-once drift-unschedule threshold-study help setup cloud-check data test portability-audit train image image-push reproduce verify clean teardown \
         tune compare register promote reload-check train-remote tune-remote seeds-remote serve serve-image loadtest drift inject-drift pipeline cost swap-check llm-eval llm-gate \
         scan-secrets deploy smoke
 
@@ -171,6 +171,9 @@ llm-gate: ## Prove the gate fails on a degraded set — expected to exit non-zer
 	python scripts/llm_eval.py --out reports/llm_eval-baseline.json >/dev/null
 	python scripts/llm_eval.py --responses evals/fixtures/triage-regressed.jsonl \
 	  --out reports/llm_eval.json --baseline reports/llm_eval-baseline.json
+
+guardrail-demo: ## Task 8: the 0.88 machine talked into no_action, and the guard that stops it (LIVE=1 to call the model)
+	python scripts/guardrail_demo.py $(if $(LIVE),--live,)
 
 cost: ## Build the cost report
 	python scripts/cost_report.py --estimate $(EST) --actual $(ACT) --rps $(RPS) --instance $(INSTANCE)

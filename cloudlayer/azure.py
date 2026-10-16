@@ -552,6 +552,83 @@ class AzureAdapter(CloudAdapter):
                 continue  # a line the logger split or truncated is skipped, not guessed at
         return rows
 
+    # --- Lab 5 ---------------------------------------------------------------
+    def generate(self, prompt: str, params: dict[str, Any]) -> dict[str, Any]:
+        """One chat completion from an Azure OpenAI deployment.
+
+        AZURE_OPENAI_ENDPOINT  https://<resource>.openai.azure.com
+        LLM_DEPLOYMENT         the deployment name (Azure routes by deployment, not by model)
+
+        params: max_output_tokens, temperature, system (the instructions), json (default True:
+        ask for a JSON object). Authenticates with an Entra ID token for the caller's identity —
+        the role it needs is "Cognitive Services OpenAI User", no API key exists in this repo.
+        Token counts are the service's own usage fields, never counted words.
+        """
+        import json
+        import time
+        import urllib.error
+        import urllib.request
+
+        endpoint = os.environ["AZURE_OPENAI_ENDPOINT"].rstrip("/")
+        deployment = params.get("deployment") or os.environ["LLM_DEPLOYMENT"]
+        messages = ([{"role": "system", "content": params["system"]}] if params.get("system")
+                    else []) + [{"role": "user", "content": prompt}]
+        body: dict[str, Any] = {"messages": messages}
+        if "max_output_tokens" in params:
+            # max_completion_tokens, not max_tokens: reasoning models (gpt-5-mini) reject
+            # the old name, and on them hidden reasoning counts against this cap too.
+            body["max_completion_tokens"] = int(params["max_output_tokens"])
+        if params.get("temperature") is not None:
+            body["temperature"] = float(params["temperature"])
+        if params.get("json", True):
+            body["response_format"] = {"type": "json_object"}
+        request = urllib.request.Request(
+            f"{endpoint}/openai/deployments/{deployment}/chat/completions"
+            "?api-version=2024-12-01-preview",
+            data=json.dumps(body).encode(),
+            headers={"Content-Type": "application/json",
+                     "Authorization": "Bearer "
+                     + self._token("https://cognitiveservices.azure.com/.default")},
+        )
+        started = time.perf_counter()
+        try:
+            for attempt in range(6):
+                try:
+                    with urllib.request.urlopen(request, timeout=120) as response:
+                        reply = json.loads(response.read())
+                    break
+                except urllib.error.HTTPError as exc:
+                    # 429: the deployment's tokens-per-minute limit (kept low on purpose, it
+                    # caps the bill too). Wait as long as the service asks, then retry.
+                    if exc.code != 429 or attempt == 5:
+                        raise
+                    time.sleep(float(exc.headers.get("retry-after", 2 ** attempt)) + 0.5)
+                    started = time.perf_counter()  # latency is the answered call, not the wait
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode(errors="replace")[:500]
+            if exc.code == 400 and "content_filter" in detail:
+                # Azure's own content filter refused the prompt before the model saw it.
+                # That is a refusal, recorded as one, with no tokens billed.
+                return {"response": json.dumps({"decision": "refused",
+                                                "reason": "blocked by the provider's content filter"}),
+                        "input_tokens": 0, "output_tokens": 0, "cached_input_tokens": 0,
+                        "latency_ms": int((time.perf_counter() - started) * 1000),
+                        "model": deployment, "finish_reason": "content_filter"}
+            raise RuntimeError(f"generate: HTTP {exc.code}: {detail}") from exc
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        usage = reply.get("usage", {})
+        choice = reply["choices"][0]
+        return {
+            "response": choice["message"].get("content") or "",
+            "input_tokens": usage.get("prompt_tokens", 0),
+            "output_tokens": usage.get("completion_tokens", 0),
+            "cached_input_tokens": (usage.get("prompt_tokens_details") or {}).get("cached_tokens", 0),
+            "reasoning_tokens": (usage.get("completion_tokens_details") or {}).get("reasoning_tokens", 0),
+            "latency_ms": latency_ms,
+            "model": reply.get("model", deployment),
+            "finish_reason": choice.get("finish_reason"),
+        }
+
     # --- Lab 5 (teardown is used by Lab 3's handout too) ------------------------
     def teardown(self, tags: dict[str, str], dry_run: bool = False) -> list[str]:
         """Delete every resource carrying ALL of these tags. Returns what was deleted.

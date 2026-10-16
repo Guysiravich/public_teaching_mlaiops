@@ -36,6 +36,10 @@ TOKEN_PRICE_TABLE: dict[str, dict[str, tuple[float, float]]] = {
         "large": (540.0, 2700.0),
     },
     "azure": {
+        # Checked 16 Oct 2026, prices.azure.com, Foundry Models, Global deployment, Korea
+        # Central (the same in Southeast Asia): 0.40 / 1.60 USD per 1M input / output tokens,
+        # x 33.526 THB/USD (open.er-api.com, same day).
+        "gpt-4.1-mini": (13.41, 53.64),
         "small": (9.5, 38.0),
         "medium": (112.0, 550.0),
         "large": (550.0, 2750.0),
@@ -55,6 +59,16 @@ CACHE_READ_FACTOR = 0.10
 # that changes every request is a way to pay extra for nothing, and it is a common and
 # expensive mistake.
 CACHE_WRITE_FACTOR = 1.25
+
+# Where a provider's published numbers differ from the generic factors above: (read, write).
+# Azure OpenAI caches automatically: a cached input token on gpt-4.1-mini is 0.10 USD/1M
+# against 0.40 fresh (a quarter, not a tenth), and there is no separate write charge — the
+# first request pays the normal input rate. Checked 16 Oct 2026 with the prices above.
+CACHE_FACTORS: dict[str, tuple[float, float]] = {"azure": (0.25, 1.0)}
+
+
+def cache_factors(provider: str) -> tuple[float, float]:
+    return CACHE_FACTORS.get(provider.lower(), (CACHE_READ_FACTOR, CACHE_WRITE_FACTOR))
 
 
 @dataclass(frozen=True)
@@ -98,7 +112,7 @@ def request_cost(provider: str, model: str, usage: Usage) -> float:
     fresh_input = usage.input_tokens - usage.cached_input_tokens
     thb = (
         fresh_input * rate_in
-        + usage.cached_input_tokens * rate_in * CACHE_READ_FACTOR
+        + usage.cached_input_tokens * rate_in * cache_factors(provider)[0]
         + usage.output_tokens * rate_out
     )
     return thb / 1_000_000
@@ -146,6 +160,7 @@ def cache_breakeven_hit_rate(provider: str, model: str, prefix_tokens: int) -> f
     if prefix_tokens <= 0:
         raise ValueError("prefix_tokens must be positive")
     token_rates(provider, model)  # validate provider and model early
-    saving_per_hit = 1.0 - CACHE_READ_FACTOR
-    extra_per_miss = CACHE_WRITE_FACTOR - 1.0
+    read, write = cache_factors(provider)
+    saving_per_hit = 1.0 - read
+    extra_per_miss = write - 1.0
     return extra_per_miss / (saving_per_hit + extra_per_miss)

@@ -47,7 +47,7 @@ def read_jsonl(path: Path) -> list[dict]:
     if not path.exists():
         raise SystemExit(f"missing file: {path}")
     rows = []
-    for lineno, line in enumerate(path.read_text().splitlines(), 1):
+    for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         line = line.strip()
         if not line:
             continue
@@ -181,11 +181,24 @@ def main() -> int:
     ap.add_argument("--out", type=Path, default=ROOT / "reports" / "llm_eval.json")
     ap.add_argument("--baseline", type=Path,
                     help="a previous report; fail if any case regresses against it")
+    ap.add_argument("--prompt-file", type=Path, default=ROOT / "prompts" / "triage-v1.md",
+                    help="--live: the system instructions sent with every case")
+    ap.add_argument("--temperature", type=float, default=None, help="--live only")
+    ap.add_argument("--max-output-tokens", type=int, default=200, help="--live only")
+    ap.add_argument("--deployment", default=None, help="--live: override LLM_DEPLOYMENT")
+    ap.add_argument("--record", type=Path, default=None,
+                    help="--live: write the responses here as a fixture, so the run can be "
+                         "re-scored offline and committed")
     args = ap.parse_args()
 
     golden = read_jsonl(args.golden)
     if args.live:
-        responses = generate_live(golden)
+        responses = generate_live(golden, args)
+        if args.record:
+            args.record.parent.mkdir(parents=True, exist_ok=True)
+            args.record.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n"
+                                           for r in responses), encoding="utf-8")
+            print(f"recorded {shown(args.record)}")
     else:
         responses = read_jsonl(args.responses)
 
@@ -212,21 +225,26 @@ def main() -> int:
     return 0
 
 
-def generate_live(golden: list[dict]) -> list[dict]:
-    """TODO(Lab 5): route each prompt through your adapter's `generate`.
+def generate_live(golden: list[dict], args: argparse.Namespace) -> list[dict]:
+    """Route each prompt through the adapter's `generate`.
 
-    Record input_tokens, output_tokens and latency_ms from the provider's own usage
-    fields — do not estimate them by counting words. Every provider tokenises
-    differently, and an estimated token count in a cost report is a fabricated number.
+    input_tokens, output_tokens and latency_ms are the provider's own usage fields, read by
+    the adapter — never estimated by counting words. Every provider tokenises differently,
+    and an estimated token count in a cost report is a fabricated number.
     """
     from src import config
     from cloudlayer.factory import get_adapter
 
-    adapter = get_adapter(config.load())
+    adapter = get_adapter(config.load(strict=False))
+    params = {"max_output_tokens": args.max_output_tokens,
+              "system": args.prompt_file.read_text(encoding="utf-8"),
+              "temperature": args.temperature, "deployment": args.deployment}
     rows = []
     for case in golden:
-        result = adapter.generate(case["prompt"], {"max_output_tokens": 200})
+        result = adapter.generate(case["prompt"], params)
         rows.append({"id": case["id"], **result})
+        print(f"  {case['id']}: {result['input_tokens']} in / {result['output_tokens']} out, "
+              f"{result['latency_ms']} ms", flush=True)
     return rows
 
 
