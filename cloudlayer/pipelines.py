@@ -57,7 +57,7 @@ def compile_azure(spec: dict[str, Any]):
     import re
 
     from azure.ai.ml import Input, Output, command
-    from azure.ai.ml.entities import Environment, PipelineJob
+    from azure.ai.ml.entities import Environment
 
     from cloudlayer.factory import get_adapter
     from src import config
@@ -75,24 +75,34 @@ def compile_azure(spec: dict[str, Any]):
     if "MLFLOW_TRACKING_URI" in variables:
         variables["ITCS355_MLFLOW_TRACKING_URI"] = variables.pop("MLFLOW_TRACKING_URI")
 
-    nodes: dict[str, Any] = {}
+    from azure.ai.ml import dsl
+
+    builders: dict[str, Any] = {}
     for step in spec["steps"]:
         text = " ".join(step["command"])
-        text = re.sub(r"\{(inputs|outputs)\.(\w+)\}", r"${{\1.\2}}", text)
-        node = command(
-            name=step["name"], display_name=step["name"], command=f"cd /app && {text}",
+        text = re.sub(r"\{(inputs|outputs)\.(\w+)\}", r"${{.}}", text)
+        builders[step["name"]] = command(
+            display_name=step["name"], command=f"cd /app && {text}",
             environment=env, compute=compute, environment_variables=variables,
             inputs={name: Input(type="uri_folder") for name in step.get("inputs", {})},
             outputs={name: Output(type="uri_folder") for name in step.get("outputs", [])},
         )
-        for name, source in step.get("inputs", {}).items():
-            upstream, output = source.split(".")
-            node.inputs[name] = nodes[upstream].outputs[output]
-        nodes[step["name"]] = node
 
-    job = PipelineJob(jobs=nodes, display_name=spec["name"],
-                      experiment_name="itcs355-lab5-pipeline",
-                      tags={k: str(v) for k, v in spec.get("tags", {}).items()})
+    @dsl.pipeline(name=spec["name"].replace("-", "_"), default_compute=compute)
+    def dag():
+        # The SDK only wires one node's output into another inside a pipeline function.
+        nodes: dict[str, Any] = {}
+        for step in spec["steps"]:
+            wired = {name: nodes[src.split(".")[0]].outputs[src.split(".")[1]]
+                     for name, src in step.get("inputs", {}).items()}
+            nodes[step["name"]] = builders[step["name"]](**wired)
+            nodes[step["name"]].name = step["name"]
+        return {}
+
+    job = dag()
+    job.display_name = spec["name"]
+    job.experiment_name = "itcs355-lab5-pipeline"
+    job.tags = {k: str(v) for k, v in spec.get("tags", {}).items()}
     job.settings.default_compute = compute
     job.settings.continue_on_step_failure = False
     job.settings.force_rerun = True
