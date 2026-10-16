@@ -1,0 +1,12 @@
+{
+  "name": "neat_truck_ysfvyx59ln",
+  "status": "Failed",
+  "steps": {
+    "ingest": "Completed",
+    "validate": "Completed",
+    "train": "Completed",
+    "evaluate": "Failed"
+  },
+  "image": "itcs3556688067.azurecr.io/itcs355/itcs355-lab1@sha256:20e8c313c9311877d6988f9c9be34a97efcb1230480a54a1124bade7395824bf",
+  "incumbent_forced": null
+}

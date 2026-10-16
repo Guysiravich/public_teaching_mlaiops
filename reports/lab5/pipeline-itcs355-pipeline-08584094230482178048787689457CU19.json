@@ -1,0 +1,11 @@
+{
+  "name": "itcs355-pipeline-08584094230482178048787689457CU19",
+  "status": "Failed",
+  "trigger": "schedule itcs355-pipeline, cron 50 20 * * * (one-off demo), started 2026-10-16T20:50:38Z",
+  "steps": {
+    "ingest": "Completed",
+    "validate": "Completed",
+    "train": "Completed",
+    "evaluate": "Failed"
+  }
+}

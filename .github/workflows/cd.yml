@@ -2,7 +2,7 @@
 #
 # Runs only on main, only after CI is green. Credentials come from OIDC federation, not
 # from stored keys: azure/login exchanges this run's GitHub token for an Azure token as the
-# user-assigned identity itcs355-gha-id, whose federated credential trusts only
+# user-assigned identity itcs355-ci-l5 (Lab 5; Lab 4 used itcs355-gha-id), whose federated credential trusts only
 #   repo:Guysiravich@52388254/public_teaching_mlaiops@1367593417:environment:staging
 # GitHub's subject carries the owner and repository IDs, not only their names: a credential
 # written as repo:Guysiravich/public_teaching_mlaiops:... is refused (AADSTS700213, first
@@ -77,8 +77,8 @@ jobs:
         # One step, because each part needs the previous one's output: push_image returns the
         # digest deploy() runs, deploy() returns the URL the smoke test calls.
         env:
-          RESOURCE_LAB: "4"
-          SERVE_ENVIRONMENT: itcs355-env-l4
+          RESOURCE_LAB: "5"
+          SERVE_ENVIRONMENT: bike-env   # the subscription allows one environment (Lab 5)
           SERVE_REVISIONS_MODE: Single
           SERVE_MIN_REPLICAS: "0"
           SERVE_MAX_REPLICAS: "1"
@@ -86,5 +86,5 @@ jobs:
           export REVISION_SUFFIX="g${SHA:0:7}"
           python scripts/deploy.py --alias staging --endpoint-name itcs355-staging \
             --instance 0.5/1.0Gi --image itcs355-serve:$SHA \
-            --endpoint-file reports/lab4-staging-endpoint.txt
+            --endpoint-file reports/lab5-staging-endpoint.txt
           echo "A deploy that is not smoke-tested is a deploy you have not verified."

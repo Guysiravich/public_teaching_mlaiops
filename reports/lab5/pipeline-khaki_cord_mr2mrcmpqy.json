@@ -1,0 +1,9 @@
+{
+  "name": "khaki_cord_mr2mrcmpqy",
+  "status": "Failed",
+  "steps": {
+    "ingest": "Failed"
+  },
+  "image": "itcs3556688067.azurecr.io/itcs355/itcs355-lab1@sha256:22aab8ccfc66303d74f1b165567504131c238f692912bb823fee77a5a8a24492",
+  "incumbent_forced": null
+}

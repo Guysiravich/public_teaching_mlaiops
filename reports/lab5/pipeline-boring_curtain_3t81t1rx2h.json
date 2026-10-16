@@ -1,0 +1,10 @@
+{
+  "name": "boring_curtain_3t81t1rx2h",
+  "status": "Failed",
+  "steps": {
+    "ingest": "Completed",
+    "validate": "Failed"
+  },
+  "image": "itcs3556688067.azurecr.io/itcs355/itcs355-lab1@sha256:689e0af00d311ef32e4f4bb4a2c3f39db908ed9f4ce0599a51c076b56561686c",
+  "incumbent_forced": null
+}
