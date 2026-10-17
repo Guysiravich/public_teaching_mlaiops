@@ -821,3 +821,73 @@ changed world.
   deleted the environment before the app inside it (`ManagedEnvironmentHasContainerApps`), so
   `teardown()` now deletes dependents first. With the CD identity deleted, a push to main fails
   at `azure/login` until Lab 5 recreates it; this commit is marked `[skip ci]` for that reason.
+
+---
+
+# Lab 5 — Operating LLM systems and defending the bill
+
+Each task has its own report; this section is the map.
+
+| Task | Where | In one line |
+|---|---|---|
+| 1 Managed pipeline | [`reports/lab5-pipeline.md`](reports/lab5-pipeline.md) | Six steps on Azure ML. Tested: an abort at validate, a real gate rejection (0.848 vs 0.854), the pass branch to staging (forced, labelled) and its rollback, and a scheduled run |
+| 2 Least privilege | same file | Three identities. Removing the blob role broke nothing, so it stays removed. Removing AcrPull failed the first step in 50 s. CD then failed on a permission nobody listed: `join` on the environment |
+| 3 Scheduled retraining | same file | Monthly, gated twice; drift alerts page a person and never retrain directly |
+| 4 Portability | [`reports/lab5-portability.md`](reports/lab5-portability.md) | AWS adapter (upload, download, invoke) demonstrated on LocalStack; the leak is configuration; verdict: worth it, not for portability |
+| 5 Cost | [`reports/lab5-cost-estimate.md`](reports/lab5-cost-estimate.md) (committed first), [`reports/lab5-cost.md`](reports/lab5-cost.md) | estimate, billing, the gap, the breakdown, cost per 1,000, one optimisation |
+| 6 Teardown | [`reports/lab5/teardown.txt`](reports/lab5/teardown.txt) | `make teardown LAB=5`, including five things a tag search cannot see |
+| 7–9 LLM step | [`reports/lab5-llm.md`](reports/lab5-llm.md) | 14-case golden set that has failed three ways, a guard that fires on demand, 7.54 THB per 1,000 and the budget defence |
+
+```bash
+make llm-eval / make llm-gate      # the course's example set
+make guardrail-demo                # Task 8, offline
+make swap-demo                     # Task 4, LocalStack
+make pipeline / make gate-fail-demo / make pipeline-schedule CRON=...   # Tasks 1 and 3
+make teardown LAB=5                # Task 6
+```
+
+## Notes for the grader — Lab 5
+
+**What this subscription would not allow, each one a finding rather than a workaround:**
+
+- **Pipeline compute.** Azure ML compute rejects `Standard_B2s`, the size the handout's
+  student note recommends, so the pipeline runs on `Standard_F2s_v2`.
+- **Container Apps environments.** The subscription allows one in total, in any region. The
+  capstone's `bike-env` held it, so the staging app ran inside that environment, with its own
+  `lab=5` tags.
+- **Azure OpenAI.** A region policy allows five regions. Of those, only Korea Central has the
+  model pay-per-token with quota.
+
+**Deviations from the provided files:**
+
+- **The second provider is LocalStack**, not an AWS account. There was no account with
+  billing. The adapter is written for AWS; the emulator is three environment lines.
+- **The adapter gains `secret()` and `rollout()`.** The pipeline's steps run with no CLI and
+  no credentials in their environment.
+- **The pipeline's steps call `scripts/pipeline_step.py`**, not the provided
+  `scripts/register.py` (which does not exist) and `deploy.py --target staging` (which needs
+  a CLI the image does not have).
+- **The YAML's `condition:` is enforced by the gate's exit code**, together with "do not
+  continue after a failed step", rather than by `dsl.condition`. The pipeline report explains
+  why.
+
+**Credentials.** The tracking server's password moved from job environment variables (Lab 2)
+to Key Vault. The training identity can read those two secrets and nothing else in the vault.
+The Azure OpenAI account has key authentication disabled.
+
+## Checklist before you submit — Lab 5
+
+- [x] Managed pipeline running the full path with a real evaluation gate
+- [x] Three scoped identities, documented, with evidence of what broke when a permission was removed
+- [x] Scheduled retraining plus the three-strategy comparison for this system
+- [x] `make portability-audit` returning zero provider strings
+- [x] Second provider's `upload`, `download` and `invoke` implemented and demonstrated (emulated — see above)
+- [x] Half-page portability write-up with an honest verdict
+- [ ] `reports/lab5-cost.md` with all six sections — COST_PLACEHOLDER
+- [ ] One applied optimisation with before and after figures — COST_PLACEHOLDER
+- [x] Teardown verified — `make teardown LAB=5`, three passes in [`reports/lab5/teardown.txt`](reports/lab5/teardown.txt): the tagged resources, then five kinds a tag search cannot see (a compute cluster, a schedule, two Key Vault secrets, a custom role, a soft-deleted OpenAI account), then two resources whose `student` tag had been written as `6688067` and a cluster left in state Failed by the refused `Standard_B2s`. Nothing tagged `lab=5` remains; the screenshot of the empty, tag-filtered resource list is submitted with the lab
+- [ ] Total term spend under 800 THB — COST_PLACEHOLDER
+- [x] Golden set of 14 cases including grounding, guardrail, injection and insufficient input
+- [x] A recorded baseline, and gate runs against a changed prompt, temperature and output cap
+- [x] One guardrail failure demonstrated on demand, with the case in the golden set
+- [x] Three token-cost figures with working shown, and the budget defence

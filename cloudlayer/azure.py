@@ -717,6 +717,57 @@ class AzureAdapter(CloudAdapter):
             _run(["az", "resource", "delete", "--ids", resource_id, "--verbose"])
         return ids
 
+    def teardown_by_name(self, untagged: dict[str, list[str]], dry_run: bool = False) -> list[str]:
+        """Delete what a tag search cannot find, by name. Lab 5 had five kinds:
+
+          computes   Azure ML compute clusters: sub-resources of the workspace, absent from
+                     `az resource list` even when they carry the tags
+          schedules  Azure ML schedules (Lab 4: no ARM tags at all)
+          secrets    Key Vault secrets in KEY_VAULT_NAME: objects in a vault, not resources;
+                     the vault itself belongs to the Lab 2 workspace and stays
+          roles      custom role definitions; their assignments go first, or the definition
+                     cannot be deleted
+          purge      soft-deleted Cognitive Services accounts, which otherwise linger 48 hours
+        """
+        group, ws = self.cfg.project_id, _parse_training_target(self.cfg.training_target)[2]
+        done: list[str] = []
+
+        def act(label: str, cmd: list[str]) -> None:
+            done.append(label)
+            if not dry_run:
+                try:
+                    _run(cmd)
+                except RuntimeError as exc:
+                    if "not found" not in str(exc).lower() and "notfound" not in str(exc).lower():
+                        raise
+
+        for name in untagged.get("schedules", []):
+            if not dry_run:
+                self.schedule(name, "", {}, "")
+            done.append(f"schedule {name}")
+        for name in untagged.get("computes", []):
+            act(f"compute {name}", ["az", "ml", "compute", "delete", "-n", name, "-g", group,
+                                    "-w", ws, "--yes"])
+        vault = os.environ.get("KEY_VAULT_NAME", "")
+        for name in untagged.get("secrets", []):
+            act(f"secret {vault}/{name}", ["az", "keyvault", "secret", "delete",
+                                           "--vault-name", vault, "-n", name])
+        for name in untagged.get("roles", []):
+            # Filtered client-side: `--all --role <name>` crashes the CLI (no scope to resolve).
+            ids = _query(["az", "role", "assignment", "list", "--all", "--query",
+                          f"[?roleDefinitionName=='{name}'].id", "-o", "tsv"]).split()
+            for assignment in ids:
+                act(f"role assignment {assignment.rsplit('/', 1)[-1]}",
+                    ["az", "role", "assignment", "delete", "--ids", assignment])
+            act(f"role definition {name!r}", ["az", "role", "definition", "delete", "--name", name])
+        for name in untagged.get("purge", []):
+            location = _query(["az", "cognitiveservices", "account", "list-deleted",
+                               "--query", f"[?name=='{name}'].location | [0]", "-o", "tsv"])
+            if location or dry_run:
+                act(f"purge {name}", ["az", "cognitiveservices", "account", "purge", "-g", group,
+                                      "-n", name, "-l", location or "?"])
+        return done
+
     def register_model(self, model_uri: str, name: str) -> str:
         """Register a tracked run's model and put its lineage ON THE VERSION.
 

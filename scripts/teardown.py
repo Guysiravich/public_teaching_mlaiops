@@ -23,6 +23,14 @@ from src import config
 # deleted service (Lab 4 handout). They are deleted by name, explicitly.
 SCHEDULES = {"4": ["itcs355-drift"]}
 
+# Lab 5 resources a tag search cannot see, deleted by name after the tagged ones
+# (cloudlayer/azure.py, teardown_by_name, says why each is invisible).
+UNTAGGED = {"5": {"schedules": ["itcs355-pipeline"], "computes": ["l5-f2s", "l5-b2s"],
+                  "secrets": ["mlflow-username", "mlflow-password"],
+                  "roles": ["itcs355 Container Apps environment joiner"],
+                  "purge": ["itcs355-aoai-l5"]}}
+# l5-b2s: the first cluster attempt, left in state Failed when Azure ML refused Standard_B2s.
+
 
 def main() -> int:
     ap = argparse.ArgumentParser()
@@ -46,6 +54,10 @@ def main() -> int:
         print("nothing carried those tags")
     for item in deleted:
         print(("would delete " if args.dry_run else "deleted ") + item)
+    extra = UNTAGGED.get(str(args.lab))
+    if extra and hasattr(adapter, "teardown_by_name"):
+        for item in adapter.teardown_by_name(extra, dry_run=args.dry_run):
+            print(("would delete " if args.dry_run else "deleted ") + item)
     print("Deletion is asynchronous: re-check the portal, and check the bill.")
     return 0
 

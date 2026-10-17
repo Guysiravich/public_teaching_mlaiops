@@ -1,0 +1,53 @@
+== make teardown LAB=5  (2026-10-17T08:11:54Z)
+python scripts/teardown.py --lab 5 
+teardown scope: {'course': 'itcs355', 'student': 'itcs355-6688067', 'lab': '5'}
+deleted /subscriptions/<sub>/resourceGroups/itcs355-6688067/providers/Microsoft.App/containerApps/itcs355-staging
+deleted /subscriptions/<sub>/resourceGroups/itcs355-6688067/providers/Microsoft.CognitiveServices/accounts/itcs355-aoai-l5
+deleted /subscriptions/<sub>/resourceGroups/itcs355-6688067/providers/Microsoft.App/managedEnvironments/bike-env
+deleted /subscriptions/<sub>/resourceGroups/itcs355-6688067/providers/Microsoft.ManagedIdentity/userAssignedIdentities/itcs355-train-l5
+deleted /subscriptions/<sub>/resourceGroups/itcs355-6688067/providers/Microsoft.ManagedIdentity/userAssignedIdentities/itcs355-serve-l5
+deleted /subscriptions/<sub>/resourceGroups/itcs355-6688067/providers/Microsoft.ManagedIdentity/userAssignedIdentities/itcs355-ci-l5
+..........deleted schedule itcs355-pipeline
+deleted compute l5-f2s
+deleted secret itcs3556keyvault46c59a3a/mlflow-username
+deleted secret itcs3556keyvault46c59a3a/mlflow-password
+deleted role definition 'itcs355 Container Apps environment joiner'
+deleted purge itcs355-aoai-l5
+Deletion is asynchronous: re-check the portal, and check the bill.
+
+== second run: bike-logs retagged (its student tag read 6688067), l5-b2s added  (2026-10-17T08:47:24Z)
+python scripts/teardown.py --lab 5 
+teardown scope: {'course': 'itcs355', 'student': 'itcs355-6688067', 'lab': '5'}
+Traceback (most recent call last):
+  File "/home/guy/itcs355/scripts/teardown.py", line 66, in <module>
+    raise SystemExit(main())
+                     ~~~~^^
+  File "/home/guy/itcs355/scripts/teardown.py", line 52, in main
+    deleted = adapter.teardown(tags, dry_run=args.dry_run)
+  File "/home/guy/itcs355/cloudlayer/azure.py", line 717, in teardown
+    _run(["az", "resource", "delete", "--ids", resource_id, "--verbose"])
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/guy/itcs355/cloudlayer/azure.py", line 77, in _run
+    raise RuntimeError(
+        f"`{' '.join(cmd)}` failed ({result.returncode}):\n{result.stdout}{result.stderr}"
+    )
+RuntimeError: `az resource delete --ids /subscriptions/<sub>/resourceGroups/itcs355-6688067/providers/Microsoft.OperationalInsights/workspaces/bike-logs --verbose` failed (1):
+Code: Workspace cannot be deleted while current provisioning state is 'Updating' please retry in a few minutes
+Message: One or more errors occurred. Operation Id: 'db84387d6403a2e45a1cd140615c46cc'
+ERROR: Some resources failed to be deleted (run with `--verbose` for more information):
+/subscriptions/<sub>/resourceGroups/itcs355-6688067/providers/Microsoft.OperationalInsights/workspaces/bike-logs
+
+make: *** [Makefile:74: teardown] Error 1
+
+== third run, after the workspace left 'Updating'  (2026-10-17T08:50:35Z)
+python scripts/teardown.py --lab 5 
+teardown scope: {'course': 'itcs355', 'student': 'itcs355-6688067', 'lab': '5'}
+deleted /subscriptions/<sub>/resourceGroups/itcs355-6688067/providers/Microsoft.OperationalInsights/workspaces/bike-logs
+  disable itcs355-pipeline: ResourceNotFoundError
+..deleted schedule itcs355-pipeline
+deleted compute l5-f2s
+deleted compute l5-b2s
+deleted secret itcs3556keyvault46c59a3a/mlflow-username
+deleted secret itcs3556keyvault46c59a3a/mlflow-password
+deleted role definition 'itcs355 Container Apps environment joiner'
+Deletion is asynchronous: re-check the portal, and check the bill.
