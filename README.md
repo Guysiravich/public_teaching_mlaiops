@@ -885,7 +885,7 @@ The Azure OpenAI account has key authentication disabled.
 - [x] Half-page portability write-up with an honest verdict
 - [ ] `reports/lab5-cost.md` with all six sections — COST_PLACEHOLDER
 - [ ] One applied optimisation with before and after figures — COST_PLACEHOLDER
-- [x] Teardown verified — `make teardown LAB=5`, three passes in [`reports/lab5/teardown.txt`](reports/lab5/teardown.txt): the tagged resources, then five kinds a tag search cannot see (a compute cluster, a schedule, two Key Vault secrets, a custom role, a soft-deleted OpenAI account), then two resources whose `student` tag had been written as `6688067` and a cluster left in state Failed by the refused `Standard_B2s`. Nothing tagged `lab=5` remains; the screenshot of the empty, tag-filtered resource list is submitted with the lab
+- [x] Teardown verified — `make teardown LAB=5`, three passes in [`reports/lab5/teardown.txt`](reports/lab5/teardown.txt): the tagged resources, then five kinds a tag search cannot see (a compute cluster, a schedule, two Key Vault secrets, a custom role, a soft-deleted OpenAI account), then two resources whose `student` tag had been written as `6688067` and a cluster left in state Failed by the refused `Standard_B2s`. Nothing tagged `lab=5` remains; screenshot of the whole subscription filtered on `lab : 5`, empty: [`reports/lab5/teardown-empty-resource-list.png`](reports/lab5/teardown-empty-resource-list.png)
 - [ ] Total term spend under 800 THB — COST_PLACEHOLDER
 - [x] Golden set of 14 cases including grounding, guardrail, injection and insufficient input
 - [x] A recorded baseline, and gate runs against a changed prompt, temperature and output cap
