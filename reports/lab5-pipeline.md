@@ -89,6 +89,32 @@ ensure … a Managed Identity with AcrPull access to the ACR is assigned to the 
 answers a question the table could not. Azure ML pulls the image as the **cluster's**
 identity, not the workspace's or the submitter's. I restored the permission at 20:36.
 
+**Experiment 3 — the one I did not plan: CI could build but not deploy.** The first CD
+run as `itcs355-ci-l5` (17 Oct, commit `75a24c6`) logged in through OIDC and pushed the
+image. Then it failed in `deploy()`:
+
+> `LinkedAuthorizationFailed`: has permission to perform `Microsoft.App/containerApps/write`
+> on `…/itcs355-staging`; however, it does not have permission to perform
+> `Microsoft.App/managedEnvironments/join/action` on the linked scope `…/bike-env`.
+
+This is the handout's own failure mode: *CI passes but deploy fails*. Writing the app is not
+enough. A PUT links the app to its environment, and that link needs **join** on the
+environment, a permission that sits on a different resource.
+
+The pipeline's deploy step never met this, because `rollout()` PATCHes only the template.
+
+I did not grant Contributor on the environment, which belongs to the capstone project.
+Instead I created a custom role, *itcs355 Container Apps environment joiner*, holding only
+`managedEnvironments/read` and `managedEnvironments/join/action`, and assigned it on that one
+environment. CD then passed (commit `bb6b4c8`): revision `itcs355-staging--gbb6b4c8` took
+100% of traffic and answered `x-model-version: 1`.
+
+The CI identity's table above gains one row:
+
+| Identity | Can do | Why |
+|---|---|---|
+| `itcs355-ci-l5` | **itcs355 Container Apps environment joiner** (custom) on `bike-env` only | attach the app it deploys to the environment |
+
 **The scheduled run** (Task 3) succeeded with the same identity. That is the handout's "fails
 only when scheduled" trap avoided by design: every step runs as the cluster's identity
 whoever, or whatever, submits it.
