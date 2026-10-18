@@ -883,10 +883,10 @@ The Azure OpenAI account has key authentication disabled.
 - [x] `make portability-audit` returning zero provider strings
 - [x] Second provider's `upload`, `download` and `invoke` implemented and demonstrated (emulated — see above)
 - [x] Half-page portability write-up with an honest verdict
-- [ ] `reports/lab5-cost.md` with all six sections — COST_PLACEHOLDER
-- [ ] One applied optimisation with before and after figures — COST_PLACEHOLDER
+- [x] [`reports/lab5-cost.md`](reports/lab5-cost.md) with all six sections — estimate committed first, billing pulled more than 24 hours after teardown; the gap is mostly a tag filter that cannot see pipeline compute (billed to the workspace)
+- [x] One applied optimisation with before and after figures — staging scaled to zero: 43.4 THB/day idle to 0, for a 35.5 s first request
 - [x] Teardown verified — `make teardown LAB=5`, three passes in [`reports/lab5/teardown.txt`](reports/lab5/teardown.txt): the tagged resources, then five kinds a tag search cannot see (a compute cluster, a schedule, two Key Vault secrets, a custom role, a soft-deleted OpenAI account), then two resources whose `student` tag had been written as `6688067` and a cluster left in state Failed by the refused `Standard_B2s`. Nothing tagged `lab=5` remains; screenshot of the whole subscription filtered on `lab : 5`, empty: [`reports/lab5/teardown-empty-resource-list.png`](reports/lab5/teardown-empty-resource-list.png)
-- [ ] Total term spend under 800 THB — COST_PLACEHOLDER
+- [x] Total term spend under 800 THB — 11.99 USD ≈ 402 THB to 18 October
 - [x] Golden set of 14 cases including grounding, guardrail, injection and insufficient input
 - [x] A recorded baseline, and gate runs against a changed prompt, temperature and output cap
 - [x] One guardrail failure demonstrated on demand, with the case in the golden set
